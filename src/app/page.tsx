@@ -283,6 +283,100 @@ function gatherOpponentClips(
   return out;
 }
 
+/** Aggregate per-goalie stats across all teams + games. Looks at goal_against events with scoutedGoalie set. */
+function aggregateGoalies(
+  teams: Team[]
+): Array<{ name: string; goalCount: number; opponents: Set<string> }> {
+  if (typeof window === "undefined") return [];
+  const map = new Map<string, { goalCount: number; opponents: Set<string> }>();
+  for (const team of teams) {
+    for (const folder of walkFolders(team.folders)) {
+      for (const game of folder.games) {
+        for (const period of game.periods) {
+          const raw = window.localStorage.getItem(`district_tags_${period.id}`);
+          if (!raw) continue;
+          try {
+            const events = JSON.parse(raw) as TaggedEvent[];
+            for (const ev of events) {
+              if (ev.actionId !== "goal_against") continue;
+              if (!ev.scoutedGoalie) continue;
+              const key = ev.scoutedGoalie.trim();
+              const existing = map.get(key) ?? { goalCount: 0, opponents: new Set<string>() };
+              existing.goalCount += 1;
+              if (game.opponent) existing.opponents.add(game.opponent);
+              map.set(key, existing);
+            }
+          } catch {
+            // skip parse errors
+          }
+        }
+      }
+    }
+  }
+  return Array.from(map.entries())
+    .map(([name, stats]) => ({ name, ...stats }))
+    .sort((a, b) => b.goalCount - a.goalCount);
+}
+
+/** All goal-against events scored on a given scouted goalie, with provenance. Sorted by date desc. */
+function gatherGoalsOnGoalie(
+  teams: Team[],
+  goalieName: string
+): Array<{
+  event: TaggedEvent;
+  gameId: string;
+  gameName: string;
+  gameDate?: string;
+  opponent?: string;
+  periodId: string;
+  periodLabel: string;
+}> {
+  if (typeof window === "undefined") return [];
+  const out: Array<{
+    event: TaggedEvent;
+    gameId: string;
+    gameName: string;
+    gameDate?: string;
+    opponent?: string;
+    periodId: string;
+    periodLabel: string;
+  }> = [];
+  for (const team of teams) {
+    for (const folder of walkFolders(team.folders)) {
+      for (const game of folder.games) {
+        for (const period of game.periods) {
+          const raw = window.localStorage.getItem(`district_tags_${period.id}`);
+          if (!raw) continue;
+          try {
+            const events = JSON.parse(raw) as TaggedEvent[];
+            for (const ev of events) {
+              if (ev.actionId !== "goal_against") continue;
+              if ((ev.scoutedGoalie ?? "").trim() !== goalieName) continue;
+              out.push({
+                event: ev,
+                gameId: game.id,
+                gameName: game.name,
+                gameDate: game.date,
+                opponent: game.opponent,
+                periodId: period.id,
+                periodLabel: period.label,
+              });
+            }
+          } catch {
+            // skip parse errors
+          }
+        }
+      }
+    }
+  }
+  out.sort((a, b) => {
+    const dateCompare = (b.gameDate ?? "").localeCompare(a.gameDate ?? "");
+    if (dateCompare !== 0) return dateCompare;
+    return (b.event.time ?? 0) - (a.event.time ?? 0);
+  });
+  return out;
+}
+
 function folderIcon(kind: FolderKind) {
   if (kind === "season") return CalendarDays;
   if (kind === "practices") return Dumbbell;
@@ -317,9 +411,11 @@ function findPeriodPath(
 
 export default function DistrictPlatform() {
   const [currentView, setCurrentView] =
-    useState<"home" | "library" | "scout" | "meeting" | "opponents">("scout");
+    useState<"home" | "library" | "scout" | "meeting" | "opponents" | "goalies">("scout");
   /** When in the Opponents view, the currently focused opponent name. Drives the aggregated clip list. */
   const [selectedOpponent, setSelectedOpponent] = useState<string | null>(null);
+  /** When in the Goalies view, the currently focused scouted goalie name. */
+  const [selectedGoalie, setSelectedGoalie] = useState<string | null>(null);
   /** Team whose roster is being managed in the modal. null = closed. */
   const [rosterModalTeamId, setRosterModalTeamId] = useState<string | null>(null);
   /** Clip whose player tags are being edited in the modal. null = closed. */
@@ -2294,6 +2390,7 @@ export default function DistrictPlatform() {
                 { id: "library", label: "Library", icon: Library },
                 { id: "scout", label: "Scouting Lab", icon: Film },
                 { id: "opponents", label: "Opponents", icon: Target },
+                { id: "goalies", label: "Goalies", icon: Activity },
                 { id: "meeting", label: "Meetings", icon: Users },
               ] as const
             ).map((tab) => (
@@ -3624,6 +3721,138 @@ export default function DistrictPlatform() {
                             })}
                           </div>
                         )}
+                      </div>
+                    );
+                  })()}
+              </>
+            )}
+          </div>
+        </div>
+      ) : currentView === "goalies" ? (
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-950">
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-black uppercase italic">
+                Goalies
+                <span className="ml-3 text-base font-mono text-slate-500">
+                  {aggregateGoalies(teams).length} scouted
+                </span>
+              </h2>
+              <span className="text-xs text-slate-500 italic">
+                Per-goalie database of goals scored on them. Drill into one to see release, location, situation.
+              </span>
+            </div>
+
+            {aggregateGoalies(teams).length === 0 ? (
+              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                <Activity size={48} className="mx-auto text-slate-700 mb-4" />
+                <p className="text-slate-300 text-lg font-bold mb-2">
+                  No goalies scouted yet
+                </p>
+                <p className="text-slate-500 text-sm">
+                  When you tag a <span className="text-rose-400 font-bold">Goal Against</span>, right-click → <span className="text-amber-400 font-bold">Set Goalie…</span> with the opposing goalie name (e.g. <span className="font-mono">"#31 Smith"</span>). That goalie's tape accumulates here.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
+                  {aggregateGoalies(teams).map((g) => {
+                    const isSelected = selectedGoalie === g.name;
+                    return (
+                      <button
+                        key={g.name}
+                        onClick={() =>
+                          setSelectedGoalie(isSelected ? null : g.name)
+                        }
+                        className={`p-4 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? "bg-amber-950/40 border-amber-500/60 ring-2 ring-amber-500/40"
+                            : "bg-slate-900/60 border-slate-800 hover:border-amber-500/50 hover:bg-slate-900"
+                        }`}
+                      >
+                        <div className="text-base font-black uppercase italic text-slate-100 mb-1 truncate">
+                          {g.name}
+                        </div>
+                        <div className="text-xs font-mono text-slate-400">
+                          {g.goalCount} goal{g.goalCount === 1 ? "" : "s"} on
+                          {g.opponents.size > 0 && (
+                            <> · {Array.from(g.opponents).slice(0, 2).join(", ")}{g.opponents.size > 2 && " +" + (g.opponents.size - 2)}</>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedGoalie &&
+                  (() => {
+                    const allGoals = gatherGoalsOnGoalie(teams, selectedGoalie);
+                    return (
+                      <div className="bg-slate-900/40 rounded-xl border border-slate-800 p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-black uppercase tracking-wide text-amber-300">
+                            {selectedGoalie}
+                            <span className="ml-3 text-sm font-mono text-slate-500">
+                              {allGoals.length} goal{allGoals.length === 1 ? "" : "s"}
+                            </span>
+                          </h3>
+                          <button
+                            onClick={() => setSelectedGoalie(null)}
+                            className="text-xs text-slate-500 hover:text-slate-300"
+                          >
+                            Close
+                          </button>
+                        </div>
+                        <div className="space-y-1.5 max-h-[60vh] overflow-y-auto pr-1">
+                          {allGoals.map(({ event, gameName, gameDate, opponent, periodId, periodLabel }) => {
+                            const dur = (event.end - event.start).toFixed(1);
+                            return (
+                              <button
+                                key={`${periodId}-${event.id}`}
+                                onClick={() => {
+                                  const path = findPeriodPath(teams, periodId);
+                                  if (path) {
+                                    setSelectedGame(path.period);
+                                    setCurrentView("scout");
+                                    setTimeout(() => playClip(event.id), 300);
+                                  }
+                                }}
+                                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-950 hover:bg-slate-900 text-left transition-colors"
+                                style={{ boxShadow: `inset 4px 0 0 #e11d48` }}
+                              >
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: "#e11d48" }} />
+                                <span className="text-[11px] font-black text-slate-100 uppercase italic tracking-tight shrink-0">
+                                  {event.type}
+                                </span>
+                                {event.strength && event.strength !== "5v5" && (() => {
+                                  const cat = strengthCategory(event.strength);
+                                  const tint =
+                                    cat === "PP" ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                                    : cat === "PK" ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                                    : cat === "EN" ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
+                                    : "bg-sky-500/20 text-sky-300 border-sky-500/40";
+                                  return (
+                                    <span className={`px-1 py-0 rounded border text-[8px] font-black tracking-wider shrink-0 ${tint}`}>
+                                      {event.strength}
+                                    </span>
+                                  );
+                                })()}
+                                {event.comment && (
+                                  <span className="text-[10px] text-slate-400 italic truncate flex-1">
+                                    {event.comment}
+                                  </span>
+                                )}
+                                <span className="text-[10px] font-mono text-slate-500 ml-auto shrink-0 flex items-center gap-2">
+                                  <span>{dur}s</span>
+                                  <span className="text-slate-600">·</span>
+                                  <span className="truncate max-w-[200px]" title={`${gameName} · ${periodLabel}${opponent ? ` · vs ${opponent}` : ""}`}>
+                                    {opponent ? `vs ${opponent}` : gameName}{gameDate ? ` · ${gameDate}` : ""}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })()}
