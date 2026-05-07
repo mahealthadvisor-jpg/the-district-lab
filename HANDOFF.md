@@ -114,29 +114,69 @@ All four popouts (`/tag-popout`, `/video-popout`, `/clips-popout`, `/stats-popou
 
 ---
 
-## Pending queue (priority order)
+## Coaching workflow + meeting taxonomy (added 2026-05-07)
 
-Highest impact first:
+Ben's HS hockey week:
+- **Mon**: show Sat film → team
+- **Tue**: show opponent pre-scout
+- **Wed**: GAME
+- **Thu**: show Wed film + practice ← **~18 hr turn = the bottleneck**
+- **Fri**: prep for Sat opponent
+- **Sat**: GAME
+- **Sun**: off
 
-1. **Shift Tracker → Lab linkup** (highest leverage — Ben confirmed 2026-05-07). Export game JSON from Shift Tracker (`mahealthadvisor-jpg.github.io/Shift-Tracker-Final/`) → import into a Period in the Lab → every clip auto-computes on-ice players via shift/clip timestamp intersection. Unlocks pending item #16 (player roster + player-driven search) with real data. Per-period offset slider handles video↔game-clock alignment. Approach: JSON export/import tied to `Period` in IndexedDB. NOT Firebase yet (overkill for solo). NOT direct browser bridge (cross-origin blocks it).
-2. **Logo decal pipeline** (Newest ask 2026-05-07). User-uploaded team logos currently render as a white-card overlay (e.g. Triton crest sat on a hard white square). The District logo looks right because it's painted into `rink.png` itself, not overlaid. Fix in `RinkMap.tsx:73-86` + upload handler: (a) canvas pass on upload — RGB > 240 → alpha 0, save cleaned PNG to IndexedDB instead of raw. (b) Add `mix-blend-mode: multiply` to logo `<img>`. (c) Drop the `drop-shadow` filter. (d) Reduce opacity to ~0.9. Also add a "Remove logo" button per team so Ben can clear his current white-card Triton overlay.
-3. **PPT slide upload to meetings** — parse `.pptx`, render as title-card blocks in playlists.
-4. **Drag-and-drop clips into folders** (XOS Edits-folder pattern, beyond just meetings)
-5. **Bulk Assign Field Value** — set strength/period/comment on N selected clips at once
-6. **Stacking Masters** — multi-angle per Period synced to puck drop. Data model: `Period.angles[]` with offsets.
-7. **Whole-Game aggregate view** — events from all periods on one rink + one playlist
-8. **Slide support** — Title Slide / X-O diagram blocks (Leader / Trailer / Overlay slots per the Filter article pattern)
-9. **Bottom timeline strip** with colored event chips (Hudl-style)
-10. **XOS-aligned hotkeys** — Arrow=±1s, Shift+Arrow playing=±15s, Ctrl+Arrow=±5s, ESC=fullscreen
-11. **Quick clip export** — raw MP4 of single clip via captureStream + MediaRecorder
-12. **Annotated export** — canvas.captureStream with telestrations + captions baked in (XOS "Output to MP4" / Voiceover pattern)
-13. **Folder Templates** — Save/Paste/Manage. XOS pattern: each game gets stamped with `Periods/Autocutups/Edits/Prescout Games` shape.
-14. **Filter Builder + Smart Meetings (Autocutups)** — full filter UI with statement preview, ANY/ALL, wildcard `equals(*)` for per-player auto-spawn
-15. **Granular strength** (3v3/4v4/4v5/5v4/5v5/5v6/6v5/Even) + **multi-coach-role comments** (HC/AC1/AC2/VC + Meeting flag)
-16. **Player roster** per team + per-event player tag + Player-Driven Search (closely related to #1 Shift Tracker linkup — sequence them together)
-17. **Drawing Tools v2** — zoom rect, text labels on video, spot shadow, object select, per-stroke duration handles
-18. **Text Overlay Templates** — field placeholders (`{period}`, `{strength}`, `{playerName}`), per-folder defaults, opacity/duration
-19. **RTSP / xbotgo / IP camera** live ingestion — needs a small ffmpeg helper to re-stream as HLS
+**Five meeting types** the Lab must support — each is a structured template, not arbitrary playlist:
+1. **Team 5v5 review** — full team, 5v5 only
+2. **PK meeting** — PK unit, 4v5 / 3v5 only
+3. **PP meeting** — PP unit, 5v4 / 5v3 only
+4. **Centermen meeting** — composite: (a) all centers' FOs, (b) opponent FO tendencies, (c) goalie scout (recent goals on opp goalie)
+5. **Systems meeting** — pulls from teach-clip library
+
+**Ten distinct workflows the Lab serves**: opponent pre-scout, own-game review, NHL teach-clip pull, practice film database, practice review, systems install, video meetings, highlight export, individual clip share, **paid client video review (commercial polish bar matters — branding/theming should be parameterized from day one)**.
+
+---
+
+## Pending queue (priority order — reranked 2026-05-07 based on workflow above)
+
+Foundation (sequence first — blocks downstream work):
+
+1. **Granular strength tagging** (3v3/4v4/4v5/5v4/5v5/5v6/6v5/Even) — required for all meeting templates to filter correctly. Data model: add `strength` field to `TaggedEvent`. Tag UI: strength selector on tag creation + bulk-assign on existing.
+2. **Per-opponent cumulative folder** — opponents become first-class entities. Tags accumulate per-opponent across multiple games of theirs. Tue pre-scout + Fri prep both pull from the cumulative bucket. Data model: add `Opponent` entity, link clips via `opponentId`.
+3. **Player roster + per-event player tag** — required for centermen/FO/goalie-scout. Each Team has `roster: Player[]`. Tag UI gets player chips. Foundation for #4-#6 + Shift Tracker linkup.
+
+Features (consume foundation):
+
+4. **Faceoff event type + Centermen module** — FO event with location/W-L/situation/taker subfields. Centermen view = filter by event type FO + group by taker.
+5. **Goalie scout module** — per-opposing-goalie file. Cumulative goals-against database tagged by location/release/situation. Centermen meeting + team meeting both pull from it.
+6. **Meeting Templates** (the killer feature — replaces old queue item "Filter Builder + Smart Meetings") — 5 templates (5v5/PK/PP/Centermen/Systems), each pre-defined filter set + slot structure. "New 5v5 Meeting from {Game}" auto-pulls relevant clips. The Wed→Thu time-saver.
+7. **Shift Tracker → Lab linkup** — JSON export from `mahealthadvisor-jpg.github.io/Shift-Tracker-Final/` → import into Period → on-ice player intersection per clip. Unlocks player chips + +/- analytics + line chemistry.
+
+Sharing (Ben's 2026-05-07 ask):
+
+8. **Quick clip download** — `video.captureStream()` + `MediaRecorder` → `.webm` Blob → trigger download. Right-click "Download" in clip context menu. v2: FFmpeg.wasm for true MP4.
+9. **Firebase share infrastructure** — new `district-lab` Firebase project (Ben must create). Storage for MP4, Firestore for metadata. Unguessable UUID short URLs, optional 30-day expiry, no auth.
+10. **Clip share + viewer route** — `/share/[id]/page.tsx` renders read-only clip with caption/strength/comment overlay.
+11. **Meeting share** — same plumbing, multi-clip playlist.
+
+Polish + future:
+
+12. **Logo decal pipeline** — bg-removal on upload (RGB > 240 → alpha 0) + `mix-blend-mode: multiply` + drop shadow + opacity 0.9. Plus "Remove logo" button per team.
+13. **Systems library** — long-running teach archive, builds slowly across season. Cross-game searchable by concept (forecheck, breakout, NZ regroup, PP entry, PK retrieval, etc.).
+14. **PPT slide upload to meetings** — parse `.pptx`, render as title-card blocks.
+15. **Drag-and-drop clips into folders** (XOS Edits-folder pattern, beyond just meetings).
+16. **Bulk Assign Field Value** — set strength/period/comment on N selected clips at once.
+17. **Stacking Masters** — multi-angle per Period synced to puck drop.
+18. **Whole-Game aggregate view** — events from all periods on one rink + one playlist.
+19. **Slide support** — Title Slide / X-O diagram blocks.
+20. **Bottom timeline strip** with colored event chips (Hudl-style).
+21. **XOS-aligned hotkeys** — Arrow=±1s, Shift+Arrow playing=±15s, Ctrl+Arrow=±5s, ESC=fullscreen.
+22. **Annotated export** — canvas.captureStream with telestrations + captions baked in.
+23. **Folder Templates** — Save/Paste/Manage.
+24. **Multi-coach-role comments** (HC/AC1/AC2/VC + Meeting flag).
+25. **Drawing Tools v2** — zoom rect, text labels, spot shadow, object select.
+26. **Text Overlay Templates** — field placeholders (`{period}`, `{strength}`, `{playerName}`).
+27. **NHL video URL ingest** — yt-dlp wrapper or screen-capture-while-playing fallback.
+28. **RTSP / xbotgo / IP camera** live ingestion — ffmpeg helper for HLS re-stream.
 
 ---
 
