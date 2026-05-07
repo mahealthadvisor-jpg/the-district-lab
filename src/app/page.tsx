@@ -1007,6 +1007,126 @@ export default function DistrictPlatform() {
     setDrawBuffer([]);
   }, []);
 
+  // ====== Clip Download ======
+  /** ID of the clip currently being recorded for download. null = idle. Used to disable other downloads + show spinner. */
+  const [recordingClipId, setRecordingClipId] = useState<number | null>(null);
+  /** Pick the best supported MediaRecorder mimeType. Falls back to browser default. */
+  function pickRecorderMimeType(): string | undefined {
+    if (typeof MediaRecorder === "undefined") return undefined;
+    const candidates = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "video/mp4",
+    ];
+    for (const m of candidates) {
+      if (MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return undefined;
+  }
+  /** Sanitize a string for use in a filename — no slashes, no leading/trailing whitespace, no consecutive separators. */
+  function sanitizeForFilename(s: string): string {
+    return s.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, "_").replace(/_+/g, "_").trim();
+  }
+  /** Record a clip via MediaRecorder + captureStream and trigger a download. */
+  async function downloadClipAsVideo(eventId: number) {
+    if (recordingClipId !== null) {
+      alert("A clip is already being recorded. Wait for it to finish.");
+      return;
+    }
+    const ev = events.find((x) => x.id === eventId);
+    const v = videoRef.current;
+    if (!ev || !v) return;
+    const dur = ev.end - ev.start;
+    if (dur <= 0) return;
+    if (typeof MediaRecorder === "undefined") {
+      alert("Your browser does not support MediaRecorder. Try Chrome or Edge.");
+      return;
+    }
+    // captureStream is on HTMLMediaElement in modern browsers; Firefox uses mozCaptureStream.
+    type CaptureCapable = HTMLVideoElement & {
+      captureStream?: () => MediaStream;
+      mozCaptureStream?: () => MediaStream;
+    };
+    const cap = v as CaptureCapable;
+    const stream = cap.captureStream?.() ?? cap.mozCaptureStream?.();
+    if (!stream) {
+      alert("This browser cannot capture video to download. Try Chrome or Edge.");
+      return;
+    }
+
+    // Save state to restore at end
+    const wasPlaying = !v.paused;
+    const prevTime = v.currentTime;
+    const wasMuted = v.muted;
+
+    setRecordingClipId(eventId);
+    try {
+      // Seek to clip start and wait
+      v.pause();
+      v.currentTime = ev.start;
+      await new Promise<void>((resolve) => {
+        const onSeek = () => {
+          v.removeEventListener("seeked", onSeek);
+          resolve();
+        };
+        v.addEventListener("seeked", onSeek);
+      });
+
+      const mimeType = pickRecorderMimeType();
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+      const finished = new Promise<Blob>((resolve) => {
+        recorder.onstop = () => {
+          const ext = (mimeType ?? "video/webm").includes("mp4") ? "mp4" : "webm";
+          resolve(new Blob(chunks, { type: `video/${ext}` }));
+        };
+      });
+
+      recorder.start();
+      await v.play();
+
+      // Stop slightly past the end to avoid truncating last frames
+      await new Promise<void>((resolve) => setTimeout(resolve, dur * 1000 + 250));
+      v.pause();
+      if (recorder.state !== "inactive") recorder.stop();
+
+      const blob = await finished;
+      const ext = (mimeType ?? "video/webm").includes("mp4") ? "mp4" : "webm";
+
+      const path = findPeriodPath(teams, ev.gameId);
+      const teamName = path?.team.name ?? "team";
+      const gameName = path?.game.name ?? "game";
+      const startStr = ev.start.toFixed(1).replace(".", "-");
+      const filename = `${sanitizeForFilename(teamName)}_${sanitizeForFilename(gameName)}_${sanitizeForFilename(ev.type)}_${startStr}s.${ext}`;
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      console.error("Clip download failed:", err);
+      alert(
+        `Download failed: ${err instanceof Error ? err.message : "unknown error"}. See console for details.`
+      );
+    } finally {
+      // Restore state best-effort
+      v.muted = wasMuted;
+      v.currentTime = prevTime;
+      if (wasPlaying) v.play().catch(() => {});
+      setRecordingClipId(null);
+    }
+  }
+
   // Telestration handlers
   function handleAddStroke(s: Stroke) {
     setDrawBuffer((prev) => [...prev, s]);
@@ -4090,6 +4210,23 @@ export default function DistrictPlatform() {
                     </button>
                   </>
                 )}
+                <div className="my-1 h-px bg-slate-800" />
+                <button
+                  onClick={() => {
+                    closeContextMenu();
+                    downloadClipAsVideo(ev.id);
+                  }}
+                  disabled={recordingClipId !== null}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={
+                    recordingClipId !== null
+                      ? "A clip is already being recorded — wait for it to finish."
+                      : "Record this clip to a downloadable video file. Plays the clip once during recording."
+                  }
+                >
+                  <Download size={13} className="text-sky-400" />
+                  {recordingClipId === ev.id ? "Recording…" : "Download Clip"}
+                </button>
                 <div className="my-1 h-px bg-slate-800" />
                 <button
                   onClick={() => {
