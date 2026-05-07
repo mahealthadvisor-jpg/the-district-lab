@@ -77,10 +77,20 @@ interface Folder {
   subFolders: Folder[];
   games: Game[];
 }
+interface Player {
+  id: string;
+  jersey: string;
+  name: string;
+  position?: "F" | "D" | "G";
+  /** Centerman flag — used by Centermen Meeting auto-pull. F-only. */
+  centerman?: boolean;
+}
 interface Team {
   id: string;
   name: string;
   folders: Folder[];
+  /** Roster of the team's players. Each clip may tag any subset of these via TaggedEvent.playerIds. */
+  roster?: Player[];
 }
 
 const DEFAULT_TEAMS: Team[] = [
@@ -310,6 +320,10 @@ export default function DistrictPlatform() {
     useState<"home" | "library" | "scout" | "meeting" | "opponents">("scout");
   /** When in the Opponents view, the currently focused opponent name. Drives the aggregated clip list. */
   const [selectedOpponent, setSelectedOpponent] = useState<string | null>(null);
+  /** Team whose roster is being managed in the modal. null = closed. */
+  const [rosterModalTeamId, setRosterModalTeamId] = useState<string | null>(null);
+  /** Clip whose player tags are being edited in the modal. null = closed. */
+  const [playerTagModalClipId, setPlayerTagModalClipId] = useState<number | null>(null);
   const [isClient, setIsClient] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -1280,6 +1294,82 @@ export default function DistrictPlatform() {
     );
     if (firstRemainingPeriod) setSelectedGame(firstRemainingPeriod);
   }
+  // ====== Roster CRUD ======
+  function addPlayer(teamId: string) {
+    const jersey = prompt("Jersey #?")?.trim();
+    if (!jersey) return;
+    const name = prompt(`Player name? (#${jersey})`)?.trim();
+    if (!name) return;
+    const posInput = prompt('Position? F / D / G (blank to skip)', "F")?.trim().toUpperCase();
+    const pos: "F" | "D" | "G" | undefined =
+      posInput === "F" || posInput === "D" || posInput === "G" ? posInput : undefined;
+    const isCenter =
+      pos === "F" ? confirm(`Is #${jersey} ${name} a centerman? (drives Centermen Meeting auto-pull)`) : false;
+    const player: Player = {
+      id: `p-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      jersey,
+      name,
+      position: pos,
+      centerman: isCenter || undefined,
+    };
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId ? { ...t, roster: [...(t.roster ?? []), player] } : t
+      )
+    );
+  }
+  function editPlayer(teamId: string, playerId: string) {
+    const team = teams.find((t) => t.id === teamId);
+    const player = team?.roster?.find((p) => p.id === playerId);
+    if (!player) return;
+    const jersey = prompt("Jersey #?", player.jersey)?.trim();
+    if (jersey === undefined || !jersey) return;
+    const name = prompt(`Player name? (#${jersey})`, player.name)?.trim();
+    if (!name) return;
+    const posInput = prompt('Position? F / D / G (blank to skip)', player.position ?? "")?.trim().toUpperCase();
+    const pos: "F" | "D" | "G" | undefined =
+      posInput === "F" || posInput === "D" || posInput === "G" ? posInput : undefined;
+    const isCenter =
+      pos === "F" ? confirm(`Is #${jersey} ${name} a centerman?`) : false;
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId
+          ? {
+              ...t,
+              roster: (t.roster ?? []).map((p) =>
+                p.id === playerId
+                  ? { ...p, jersey, name, position: pos, centerman: isCenter || undefined }
+                  : p
+              ),
+            }
+          : t
+      )
+    );
+  }
+  function deletePlayer(teamId: string, playerId: string) {
+    if (!confirm("Remove this player from the roster? Existing clip tags pointing at them will become stale but not deleted.")) return;
+    setTeams((prev) =>
+      prev.map((t) =>
+        t.id === teamId
+          ? { ...t, roster: (t.roster ?? []).filter((p) => p.id !== playerId) }
+          : t
+      )
+    );
+  }
+  /** Toggle a single player on the currently-selected event's playerIds. */
+  function togglePlayerOnEvent(eventId: number, playerId: string) {
+    setEvents((prev) =>
+      prev.map((e) => {
+        if (e.id !== eventId) return e;
+        const current = e.playerIds ?? [];
+        const next = current.includes(playerId)
+          ? current.filter((id) => id !== playerId)
+          : [...current, playerId];
+        return { ...e, playerIds: next.length ? next : undefined };
+      })
+    );
+  }
+
   function renameTeam(teamId: string) {
     const t = teams.find((x) => x.id === teamId);
     if (!t) return;
@@ -2078,6 +2168,13 @@ export default function DistrictPlatform() {
                         className="opacity-30 group-hover/team:opacity-100 p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-amber-400"
                       >
                         <Pencil size={10} />
+                      </button>
+                      <button
+                        onClick={() => setRosterModalTeamId(team.id)}
+                        title={`Manage roster (${team.roster?.length ?? 0} player${team.roster?.length === 1 ? "" : "s"})`}
+                        className="opacity-30 group-hover/team:opacity-100 p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-sky-400"
+                      >
+                        <Users size={10} />
                       </button>
                       <button
                         onClick={() => addFolder(team.id)}
@@ -2879,6 +2976,25 @@ export default function DistrictPlatform() {
                               </span>
                             );
                           })()}
+                          {e.playerIds && e.playerIds.length > 0 && (() => {
+                            const path = findPeriodPath(teams, e.gameId);
+                            const roster = path?.team?.roster ?? [];
+                            const tagged = e.playerIds!
+                              .map((id) => roster.find((p) => p.id === id))
+                              .filter((p): p is Player => Boolean(p));
+                            if (tagged.length === 0) return null;
+                            const tooltipLines = tagged.map((p) => `#${p.jersey} ${p.name}`).join("\n");
+                            return (
+                              <span
+                                title={`Players:\n${tooltipLines}`}
+                                className="flex items-center gap-0.5 text-[8px] font-mono font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded px-1 py-0"
+                              >
+                                <Users size={9} />
+                                {tagged.slice(0, 3).map((p) => `#${p.jersey}`).join(" ")}
+                                {tagged.length > 3 && ` +${tagged.length - 3}`}
+                              </span>
+                            );
+                          })()}
                           {e.trimmed && (
                             <span
                               title="Manually trimmed"
@@ -3632,6 +3748,18 @@ export default function DistrictPlatform() {
                   />
                   {ev.flagged ? "Unflag" : "Flag for Review"}
                 </button>
+                <button
+                  onClick={() => {
+                    closeContextMenu();
+                    setPlayerTagModalClipId(ev.id);
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
+                >
+                  <Users size={13} className="text-sky-400" />
+                  Tag Players… {ev.playerIds && ev.playerIds.length > 0 && (
+                    <span className="ml-auto text-[10px] font-mono text-slate-500">{ev.playerIds.length}</span>
+                  )}
+                </button>
                 <div className="my-1 h-px bg-slate-800" />
                 <button
                   onClick={() => {
@@ -3842,6 +3970,188 @@ export default function DistrictPlatform() {
           </div>
         </div>
       )}
+
+      {/* ====== Roster Modal ====== */}
+      {rosterModalTeamId &&
+        (() => {
+          const team = teams.find((t) => t.id === rosterModalTeamId);
+          if (!team) return null;
+          const roster = team.roster ?? [];
+          const sorted = [...roster].sort((a, b) => {
+            const ja = parseInt(a.jersey, 10);
+            const jb = parseInt(b.jersey, 10);
+            if (!isNaN(ja) && !isNaN(jb)) return ja - jb;
+            return a.jersey.localeCompare(b.jersey);
+          });
+          return (
+            <div
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              onClick={() => setRosterModalTeamId(null)}
+            >
+              <div
+                className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between p-5 border-b border-slate-800">
+                  <div>
+                    <h2 className="text-xl font-black uppercase italic tracking-wide text-slate-100">
+                      Roster · {team.name}
+                    </h2>
+                    <p className="text-[11px] font-mono text-slate-500 mt-1">
+                      {roster.length} player{roster.length === 1 ? "" : "s"}
+                      {" · "}
+                      {roster.filter((p) => p.centerman).length} centermen
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setRosterModalTeamId(null)}
+                    className="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-1.5">
+                  {sorted.length === 0 ? (
+                    <div className="text-center py-12 text-slate-500 text-sm italic">
+                      No players yet. Add the roster to enable Centermen / Faceoff / player-driven filters.
+                    </div>
+                  ) : (
+                    sorted.map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-950 hover:bg-slate-900 border border-slate-800 group"
+                      >
+                        <span className="font-mono text-sm font-black text-emerald-400 w-10 shrink-0">
+                          #{p.jersey}
+                        </span>
+                        <span className="flex-1 text-sm font-bold text-slate-100 truncate">
+                          {p.name}
+                        </span>
+                        {p.position && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${
+                              p.position === "G"
+                                ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+                                : p.position === "D"
+                                ? "bg-sky-500/15 text-sky-300 border-sky-500/40"
+                                : "bg-emerald-500/15 text-emerald-300 border-emerald-500/40"
+                            }`}
+                          >
+                            {p.position}
+                          </span>
+                        )}
+                        {p.centerman && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-violet-500/15 text-violet-300 border border-violet-500/40">
+                            C
+                          </span>
+                        )}
+                        <button
+                          onClick={() => editPlayer(team.id, p.id)}
+                          title="Edit"
+                          className="opacity-30 group-hover:opacity-100 p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-amber-400"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                        <button
+                          onClick={() => deletePlayer(team.id, p.id)}
+                          title="Remove from roster"
+                          className="opacity-30 group-hover:opacity-100 p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-rose-400"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="p-4 border-t border-slate-800">
+                  <button
+                    onClick={() => addPlayer(team.id)}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black uppercase tracking-widest"
+                  >
+                    <Plus size={14} /> Add Player
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* ====== Per-clip Player Tag Modal ====== */}
+      {playerTagModalClipId !== null &&
+        (() => {
+          const clip = events.find((e) => e.id === playerTagModalClipId);
+          if (!clip) return null;
+          const path = findPeriodPath(teams, clip.gameId);
+          const team = path?.team;
+          const roster = team?.roster ?? [];
+          const tagged = new Set(clip.playerIds ?? []);
+          const sorted = [...roster].sort((a, b) => {
+            const ja = parseInt(a.jersey, 10);
+            const jb = parseInt(b.jersey, 10);
+            if (!isNaN(ja) && !isNaN(jb)) return ja - jb;
+            return a.jersey.localeCompare(b.jersey);
+          });
+          return (
+            <div
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              onClick={() => setPlayerTagModalClipId(null)}
+            >
+              <div
+                className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between p-5 border-b border-slate-800">
+                  <div>
+                    <h2 className="text-lg font-black uppercase italic tracking-wide text-slate-100">
+                      Tag Players · {clip.type}
+                    </h2>
+                    <p className="text-[11px] font-mono text-slate-500 mt-1">
+                      {tagged.size} of {roster.length} selected
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setPlayerTagModalClipId(null)}
+                    className="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  {roster.length === 0 ? (
+                    <div className="text-center py-8 text-slate-500 text-sm italic">
+                      No roster yet for {team?.name ?? "this team"}. Open the roster (people icon next to team name) and add players first.
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {sorted.map((p) => {
+                        const sel = tagged.has(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            onClick={() => togglePlayerOnEvent(clip.id, p.id)}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-all ${
+                              sel
+                                ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                                : "bg-slate-950 text-slate-300 border-slate-800 hover:border-emerald-600 hover:text-slate-100"
+                            }`}
+                          >
+                            <span className="font-mono font-black">
+                              #{p.jersey}
+                            </span>
+                            <span>{p.name}</span>
+                            {p.centerman && (
+                              <span className={`text-[8px] font-black uppercase ${sel ? "text-violet-900" : "text-violet-400"}`}>C</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }

@@ -117,6 +117,8 @@ export interface TaggedEvent {
   trimmed?: boolean;
   /** On-ice strength state at the moment of the tag. Drives PK/PP/5v5 meeting filters. */
   strength?: Strength;
+  /** IDs of your players on the ice / involved on this clip. Drives Centermen + player-driven filters. */
+  playerIds?: string[];
 }
 
 export type SyncMessage =
