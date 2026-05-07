@@ -118,23 +118,25 @@ All four popouts (`/tag-popout`, `/video-popout`, `/clips-popout`, `/stats-popou
 
 Highest impact first:
 
-1. **PPT slide upload to meetings** — parse `.pptx`, render as title-card blocks in playlists. Newest ask.
-2. **Drag-and-drop clips into folders** (XOS Edits-folder pattern, beyond just meetings)
-3. **Bulk Assign Field Value** — set strength/period/comment on N selected clips at once
-4. **Stacking Masters** — multi-angle per Period synced to puck drop. Data model: `Period.angles[]` with offsets.
-5. **Whole-Game aggregate view** — events from all periods on one rink + one playlist
-6. **Slide support** — Title Slide / X-O diagram blocks (Leader / Trailer / Overlay slots per the Filter article pattern)
-7. **Bottom timeline strip** with colored event chips (Hudl-style)
-8. **XOS-aligned hotkeys** — Arrow=±1s, Shift+Arrow playing=±15s, Ctrl+Arrow=±5s, ESC=fullscreen
-9. **Quick clip export** — raw MP4 of single clip via captureStream + MediaRecorder
-10. **Annotated export** — canvas.captureStream with telestrations + captions baked in (XOS "Output to MP4" / Voiceover pattern)
-11. **Folder Templates** — Save/Paste/Manage. XOS pattern: each game gets stamped with `Periods/Autocutups/Edits/Prescout Games` shape.
-12. **Filter Builder + Smart Meetings (Autocutups)** — full filter UI with statement preview, ANY/ALL, wildcard `equals(*)` for per-player auto-spawn
-13. **Granular strength** (3v3/4v4/4v5/5v4/5v5/5v6/6v5/Even) + **multi-coach-role comments** (HC/AC1/AC2/VC + Meeting flag)
-14. **Player roster** per team + per-event player tag + Player-Driven Search
-15. **Drawing Tools v2** — zoom rect, text labels on video, spot shadow, object select, per-stroke duration handles
-16. **Text Overlay Templates** — field placeholders (`{period}`, `{strength}`, `{playerName}`), per-folder defaults, opacity/duration
-17. **RTSP / xbotgo / IP camera** live ingestion — needs a small ffmpeg helper to re-stream as HLS
+1. **Shift Tracker → Lab linkup** (highest leverage — Ben confirmed 2026-05-07). Export game JSON from Shift Tracker (`mahealthadvisor-jpg.github.io/Shift-Tracker-Final/`) → import into a Period in the Lab → every clip auto-computes on-ice players via shift/clip timestamp intersection. Unlocks pending item #16 (player roster + player-driven search) with real data. Per-period offset slider handles video↔game-clock alignment. Approach: JSON export/import tied to `Period` in IndexedDB. NOT Firebase yet (overkill for solo). NOT direct browser bridge (cross-origin blocks it).
+2. **Logo decal pipeline** (Newest ask 2026-05-07). User-uploaded team logos currently render as a white-card overlay (e.g. Triton crest sat on a hard white square). The District logo looks right because it's painted into `rink.png` itself, not overlaid. Fix in `RinkMap.tsx:73-86` + upload handler: (a) canvas pass on upload — RGB > 240 → alpha 0, save cleaned PNG to IndexedDB instead of raw. (b) Add `mix-blend-mode: multiply` to logo `<img>`. (c) Drop the `drop-shadow` filter. (d) Reduce opacity to ~0.9. Also add a "Remove logo" button per team so Ben can clear his current white-card Triton overlay.
+3. **PPT slide upload to meetings** — parse `.pptx`, render as title-card blocks in playlists.
+4. **Drag-and-drop clips into folders** (XOS Edits-folder pattern, beyond just meetings)
+5. **Bulk Assign Field Value** — set strength/period/comment on N selected clips at once
+6. **Stacking Masters** — multi-angle per Period synced to puck drop. Data model: `Period.angles[]` with offsets.
+7. **Whole-Game aggregate view** — events from all periods on one rink + one playlist
+8. **Slide support** — Title Slide / X-O diagram blocks (Leader / Trailer / Overlay slots per the Filter article pattern)
+9. **Bottom timeline strip** with colored event chips (Hudl-style)
+10. **XOS-aligned hotkeys** — Arrow=±1s, Shift+Arrow playing=±15s, Ctrl+Arrow=±5s, ESC=fullscreen
+11. **Quick clip export** — raw MP4 of single clip via captureStream + MediaRecorder
+12. **Annotated export** — canvas.captureStream with telestrations + captions baked in (XOS "Output to MP4" / Voiceover pattern)
+13. **Folder Templates** — Save/Paste/Manage. XOS pattern: each game gets stamped with `Periods/Autocutups/Edits/Prescout Games` shape.
+14. **Filter Builder + Smart Meetings (Autocutups)** — full filter UI with statement preview, ANY/ALL, wildcard `equals(*)` for per-player auto-spawn
+15. **Granular strength** (3v3/4v4/4v5/5v4/5v5/5v6/6v5/Even) + **multi-coach-role comments** (HC/AC1/AC2/VC + Meeting flag)
+16. **Player roster** per team + per-event player tag + Player-Driven Search (closely related to #1 Shift Tracker linkup — sequence them together)
+17. **Drawing Tools v2** — zoom rect, text labels on video, spot shadow, object select, per-stroke duration handles
+18. **Text Overlay Templates** — field placeholders (`{period}`, `{strength}`, `{playerName}`), per-folder defaults, opacity/duration
+19. **RTSP / xbotgo / IP camera** live ingestion — needs a small ffmpeg helper to re-stream as HLS
 
 ---
 
