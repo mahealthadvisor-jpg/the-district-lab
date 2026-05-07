@@ -187,6 +187,38 @@ Sharing (Ben's 2026-05-07 ask):
 
 **N7. Autocutups confirmation (already partially built).** Ben confirmed 2026-05-07: existing prefix codes (`pk_iz`, `pk_fc`, `pp_breakout`, `pp_ozp`, etc.) ARE the autocutup pattern — XOS-style code naming where the prefix encodes strength implicitly. Meeting Templates filter (just fixed in this session) now matches both explicit Strength field AND prefix codes — `PK` template matches `strengthCategory==="PK" OR actionId.startsWith("pk_")`. Future autocutups will compose multiple prefix matches + strength + zone + player.
 
+**N8. Per-season + per-opponent folder template (XOS pattern, locked 2026-05-07 PM).** Each Season is the template root. Within a Season, an `Opponents/` container auto-populates. Each opponent gets stamped with this XOS sub-structure:
+
+```
+Newburyport (Team)/
+  2025-26 Season/
+    📁 Opponents/                 ← auto-populates as you tag opponents on games
+      🎯 Triton/
+        📹 Prescout/
+          [opponent video clips]
+          ⚡ Autocuts/            ← scope: Prescout clips ONLY (their PKFC, their PP, their goals)
+        🏒 Games/
+          Game vs Triton 1/15/    ← your tagged clips
+          Game vs Triton 2/8/     ← your tagged clips
+          ⚡ Autocuts/            ← scope: ALL your tape across every game vs Triton
+        🎬 Meetings/              ← scoped to this opponent
+      🎯 Methuen/  [same template]
+    🏋️ Practices/
+    📋 Player Meetings/
+  2024-25 Season/  [archived prior season, same skeleton]
+```
+
+**Key principle: folder POSITION = data SCOPE.** The Autocut definition (filter rule) is reusable; what changes is the dataset it filters against, set by where the autocut folder sits.
+
+**Auto-stamping logic:**
+- Tagging a game with `opponent: "Triton"` (existing rename prompt) checks `Opponents/Triton/` in current Season → if missing, creates folder + 5-template (Prescout, Prescout/Autocuts, Games, Games/Autocuts, Meetings) → drops new game in `Triton/Games/`.
+- "Add Season" action → stamps Opponents/, Practices/, Player Meetings/.
+- Sensible default Autocut definitions stamped on creation (their PK / their PP / their goals; your PK / your PP / your faceoffs / your goals against). User can edit/delete via Settings (N2).
+
+**New Folder kinds:** `opponents-root`, `opponent`, `prescout`, `autocuts` (with `scope` attribute).
+
+**Effort:** ~4-6 hr after Firestore migration (since folder tree lives in Firestore post-N1).
+
 ### Older queue (pushed below new top priorities)
 
 10. **Clip share + viewer route** — `/share/[id]/page.tsx` renders read-only clip with caption/strength/comment overlay. Folds into N3.

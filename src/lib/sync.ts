@@ -33,8 +33,7 @@ export type Strength =
   | "4v4"
   | "3v3"
   | "6v5"
-  | "5v6"
-  | "Even";
+  | "5v6";
 
 export const STRENGTHS: Strength[] = [
   "5v5",
@@ -48,7 +47,6 @@ export const STRENGTHS: Strength[] = [
   "3v4",
   "6v5",
   "5v6",
-  "Even",
 ];
 
 /** Categorical grouping used by meeting templates. PP/PK perspective is always your team. */
@@ -68,7 +66,6 @@ export function strengthCategory(s: Strength | undefined): "5v5" | "PP" | "PK" |
     case "6v5":
     case "5v6":
       return "EN";
-    case "Even":
     case "4v4":
     case "3v3":
       return "OT";

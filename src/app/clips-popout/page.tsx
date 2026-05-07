@@ -2,7 +2,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Activity, PlayCircle, Star, Pencil, Wifi } from "lucide-react";
 import { CODE_COLORS } from "@/lib/codes";
-import { CHANNEL_NAME, SyncMessage, TaggedEvent } from "@/lib/sync";
+import { CHANNEL_NAME, SyncMessage, TaggedEvent, strengthCategory } from "@/lib/sync";
 
 export default function ClipsPopoutPage() {
   const [isClient, setIsClient] = useState(false);
@@ -149,6 +149,24 @@ export default function ClipsPopoutPage() {
                   <span className="text-[11px] font-black text-slate-100 uppercase italic tracking-tight flex-1 truncate">
                     {e.type}
                   </span>
+                  {(() => {
+                    const s = e.strength ?? "5v5";
+                    const cat = strengthCategory(s);
+                    const tint =
+                      cat === "PP" ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                      : cat === "PK" ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                      : cat === "EN" ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
+                      : cat === "OT" ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                      : "bg-slate-700/40 text-slate-300 border-slate-600/50";
+                    return (
+                      <span
+                        title={`Strength: ${s}${cat !== "5v5" ? ` (${cat})` : ""}`}
+                        className={`px-1 py-0 rounded border text-[9px] font-black tracking-wider shrink-0 ${tint}`}
+                      >
+                        {s}
+                      </span>
+                    );
+                  })()}
                   {e.flagged && (
                     <Star size={11} className="text-amber-400 shrink-0" fill="currentColor" />
                   )}

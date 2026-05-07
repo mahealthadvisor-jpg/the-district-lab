@@ -3251,19 +3251,21 @@ export default function DistrictPlatform() {
                               aria-label="Flagged"
                             />
                           )}
-                          {e.strength && e.strength !== "5v5" && (() => {
-                            const cat = strengthCategory(e.strength);
+                          {(() => {
+                            const s = e.strength ?? "5v5";
+                            const cat = strengthCategory(s);
                             const tint =
                               cat === "PP" ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
                               : cat === "PK" ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
                               : cat === "EN" ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
-                              : "bg-sky-500/20 text-sky-300 border-sky-500/40";
+                              : cat === "OT" ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                              : "bg-slate-700/40 text-slate-300 border-slate-600/50";
                             return (
                               <span
-                                title={`Strength: ${e.strength} (${cat})`}
-                                className={`px-1 py-0 rounded border text-[8px] font-black tracking-wider ${tint}`}
+                                title={`Strength: ${s}${cat !== "5v5" ? ` (${cat})` : ""}`}
+                                className={`px-1 py-0 rounded border text-[9px] font-black tracking-wider ${tint}`}
                               >
-                                {e.strength}
+                                {s}
                               </span>
                             );
                           })()}
@@ -3693,16 +3695,18 @@ export default function DistrictPlatform() {
                                       fill="currentColor"
                                     />
                                   )}
-                                  {event.strength && event.strength !== "5v5" && (() => {
-                                    const cat = strengthCategory(event.strength);
+                                  {(() => {
+                                    const s = event.strength ?? "5v5";
+                                    const cat = strengthCategory(s);
                                     const tint =
                                       cat === "PP" ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
                                       : cat === "PK" ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
                                       : cat === "EN" ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
-                                      : "bg-sky-500/20 text-sky-300 border-sky-500/40";
+                                      : cat === "OT" ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                                      : "bg-slate-700/40 text-slate-300 border-slate-600/50";
                                     return (
-                                      <span className={`px-1 py-0 rounded border text-[8px] font-black tracking-wider shrink-0 ${tint}`}>
-                                        {event.strength}
+                                      <span className={`px-1 py-0 rounded border text-[9px] font-black tracking-wider shrink-0 ${tint}`}>
+                                        {s}
                                       </span>
                                     );
                                   })()}
