@@ -398,7 +398,8 @@ export default function DistrictPlatform() {
   // Persisted meetings (clip playlists with notes) — declared early so the
   // Telestration overlay rule can reference activeMeetingId.
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [meetingModalClips, setMeetingModalClips] = useState<number[] | null>(null);
+  /** When non-null, the meeting modal is open. Each ClipRef carries the proper periodId (gameId field) + eventId, so cross-period template meetings save correctly. */
+  const [meetingModalClips, setMeetingModalClips] = useState<ClipRef[] | null>(null);
   const [meetingNameInput, setMeetingNameInput] = useState("");
   const [meetingNotesInput, setMeetingNotesInput] = useState("");
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
@@ -1668,8 +1669,82 @@ export default function DistrictPlatform() {
     lastSelectedIdRef.current = null;
   }
 
+  // ====== Meeting Templates ======
+  type MeetingTemplate = "5v5" | "PK" | "PP" | "Centermen";
+  /** Load all events from every period of the currently-selected game.
+   * Used by meeting templates to pull whole-game clips, not just current period. */
+  function loadAllPeriodsForCurrentGame(): TaggedEvent[] {
+    const path = findPeriodPath(teams, selectedGame.id);
+    if (!path) return events;
+    const allEvents: TaggedEvent[] = [];
+    for (const period of path.game.periods) {
+      // Use current period's in-memory events for the active period (might have unsaved edits)
+      if (period.id === selectedGame.id) {
+        allEvents.push(...events);
+        continue;
+      }
+      const raw = localStorage.getItem(`district_tags_${period.id}`);
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw) as TaggedEvent[];
+        allEvents.push(...parsed);
+      } catch {
+        // skip parse errors
+      }
+    }
+    return allEvents;
+  }
+  function templateMatches(e: TaggedEvent, template: MeetingTemplate): boolean {
+    switch (template) {
+      case "5v5":
+        // Treat undefined strength as 5v5 (default for legacy clips)
+        return !e.strength || e.strength === "5v5";
+      case "PK":
+        return strengthCategory(e.strength) === "PK";
+      case "PP":
+        return strengthCategory(e.strength) === "PP";
+      case "Centermen":
+        // FOs (with or without W/L set) + goal-againsts where the goalie has been scouted
+        return (
+          e.actionId === "faceoff" ||
+          (e.actionId === "goal_against" && Boolean(e.scoutedGoalie))
+        );
+      default:
+        return false;
+    }
+  }
+  /** Open meeting modal pre-populated with template-matching clips from the whole current game. */
+  function openMeetingFromTemplate(template: MeetingTemplate) {
+    const path = findPeriodPath(teams, selectedGame.id);
+    const gameLabel = path?.game.name ?? selectedGame.label;
+    const all = loadAllPeriodsForCurrentGame();
+    const matching = all.filter((e) => templateMatches(e, template));
+    // Each event already carries its origin periodId in its gameId field.
+    const refs: ClipRef[] = matching.map((e) => ({ gameId: e.gameId, eventId: e.id }));
+    const defaultName = (() => {
+      switch (template) {
+        case "5v5":
+          return `Team 5v5 Review · ${gameLabel}`;
+        case "PK":
+          return `PK Meeting · ${gameLabel}`;
+        case "PP":
+          return `PP Meeting · ${gameLabel}`;
+        case "Centermen":
+          return `Centermen Meeting · ${gameLabel}`;
+      }
+    })();
+    setMeetingModalClips(refs);
+    setMeetingNameInput(defaultName);
+    setMeetingNotesInput("");
+  }
+
   function openMeetingModal(clipIds: number[]) {
-    setMeetingModalClips(clipIds);
+    // Caller passes raw event IDs from the current period. Convert to ClipRefs.
+    const refs: ClipRef[] = clipIds.map((eventId) => ({
+      gameId: selectedGame.id,
+      eventId,
+    }));
+    setMeetingModalClips(refs);
     setMeetingNameInput("");
     setMeetingNotesInput("");
   }
@@ -1678,10 +1753,7 @@ export default function DistrictPlatform() {
   }
   function saveMeeting() {
     if (!meetingModalClips || meetingNameInput.trim() === "") return;
-    const refs: ClipRef[] = meetingModalClips.map((eventId) => ({
-      gameId: selectedGame.id,
-      eventId,
-    }));
+    const refs = meetingModalClips;
     const m: Meeting = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: meetingNameInput.trim(),
@@ -3453,6 +3525,96 @@ export default function DistrictPlatform() {
                 Group clips in the Scouting Lab → they show up here as review reels.
               </span>
             </div>
+
+            {/* ====== Meeting Templates (Wed→Thu time-saver) ====== */}
+            {(() => {
+              const path = findPeriodPath(teams, selectedGame.id);
+              const gameLabel = path?.game.name ?? selectedGame.label;
+              const allClips = loadAllPeriodsForCurrentGame();
+              const templates: Array<{
+                key: MeetingTemplate;
+                label: string;
+                description: string;
+                tint: string;
+                accent: string;
+              }> = [
+                {
+                  key: "5v5",
+                  label: "Team 5v5 Review",
+                  description: "Even-strength clips · for Mon team review",
+                  tint: "bg-emerald-950/40 border-emerald-700/40 hover:border-emerald-500",
+                  accent: "text-emerald-300",
+                },
+                {
+                  key: "PK",
+                  label: "PK Meeting",
+                  description: "4v5 / 3v5 / 3v4 only",
+                  tint: "bg-rose-950/40 border-rose-700/40 hover:border-rose-500",
+                  accent: "text-rose-300",
+                },
+                {
+                  key: "PP",
+                  label: "PP Meeting",
+                  description: "5v4 / 5v3 / 4v3 only",
+                  tint: "bg-yellow-950/40 border-yellow-700/40 hover:border-yellow-500",
+                  accent: "text-yellow-300",
+                },
+                {
+                  key: "Centermen",
+                  label: "Centermen Meeting",
+                  description: "Faceoffs + scouted goals on opp goalie",
+                  tint: "bg-violet-950/40 border-violet-700/40 hover:border-violet-500",
+                  accent: "text-violet-300",
+                },
+              ];
+              return (
+                <div className="mb-8 p-5 rounded-2xl bg-slate-900/40 border border-slate-800">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-300">
+                        From Template
+                      </h3>
+                      <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                        Whole-game pull · {allClips.length} clip{allClips.length === 1 ? "" : "s"} from {gameLabel}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {templates.map((t) => {
+                      const matchingCount = allClips.filter((e) => templateMatches(e, t.key)).length;
+                      const disabled = matchingCount === 0;
+                      return (
+                        <button
+                          key={t.key}
+                          onClick={() => openMeetingFromTemplate(t.key)}
+                          disabled={disabled}
+                          title={
+                            disabled
+                              ? `No matching clips in ${gameLabel}`
+                              : `Build a meeting from ${matchingCount} matching clip${matchingCount === 1 ? "" : "s"}`
+                          }
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            disabled
+                              ? "bg-slate-950/40 border-slate-800 opacity-40 cursor-not-allowed"
+                              : t.tint
+                          }`}
+                        >
+                          <div className={`text-sm font-black uppercase italic mb-1 ${disabled ? "text-slate-500" : t.accent}`}>
+                            {t.label}
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-500 leading-tight mb-1">
+                            {t.description}
+                          </div>
+                          <div className={`text-[11px] font-mono font-black ${disabled ? "text-slate-600" : "text-slate-200"}`}>
+                            {matchingCount} clip{matchingCount === 1 ? "" : "s"}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {meetings.length === 0 ? (
               <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
