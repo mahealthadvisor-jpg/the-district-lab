@@ -160,12 +160,12 @@ export default function ClipsPopoutPage() {
                   )}
                   <PlayCircle size={12} className="text-slate-500" />
                 </div>
-                <div className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500">
-                  <span>
+                <div className="flex items-center gap-2 text-[11px] font-mono text-slate-300">
+                  <span className="font-bold">
                     {e.start.toFixed(1)}s → {e.end.toFixed(1)}s
                   </span>
-                  <span className="text-slate-700">·</span>
-                  <span>{dur}s</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-slate-400 font-bold">{dur}s</span>
                 </div>
               </button>
               <input

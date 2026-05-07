@@ -112,6 +112,18 @@ All four popouts (`/tag-popout`, `/video-popout`, `/clips-popout`, `/stats-popou
 12. **Drag-and-drop clips into Meetings** — works in two ways: (a) floating "Drop in Meeting" panel during drag, (b) **Meetings section pinned at the bottom of the Active Vault sidebar** as drop targets (XOS pattern).
 13. **Full CRUD** at every Active Vault level — Team / Folder / sub-Folder / Game / Period all support add, rename, delete via faintly-visible icons (30% opacity, 100% on hover).
 
+### Shipped 2026-05-07 (this session)
+
+14. **Granular strength tagging** — Strength type (5v5/5v4/4v5/5v3/3v5/4v3/3v4/4v4/3v3/6v5/5v6/Even) on `TaggedEvent`. Pill-row selector above CodeWindow with PP/PK/EN/OT color coding, persists in localStorage, badges on clip rows, bulk-set in multi-select bar. `strengthCategory()` helper groups into 5v5/PP/PK/EN/OT for meeting filters.
+15. **Per-opponent cumulative folder** — `Game.opponent` + `Game.date` fields, prompted on game create/rename. New **Opponents** top-level tab aggregates clip counts across every game vs each opponent. Click an opponent → all clips chronologically with provenance (game/period/strength). Click a clip → jumps to source period and plays.
+16. **Player roster + per-clip player tagging** — `Team.roster: Player[]` (jersey/name/position F-D-G/centerman flag). Roster modal accessed via Users icon on team row. Right-click clip → Tag Players modal → chip-picker. Clip rows show compact `#7 #14 +2` jersey chips with full names in tooltip.
+17. **Faceoff W/L + goalie scout fields** — `TaggedEvent.faceoffResult` + `scoutedGoalie`. Right-click faceoff → Mark Win/Loss; right-click goal-against → Set Goalie. Badges on clip rows.
+18. **Meeting Templates** (the killer feature) — Meetings tab gets "From Template" buttons for Team 5v5 / PK / PP / Centermen. Pulls clips from ALL periods of currently-selected game, opens meeting modal pre-populated with smart default name. `meetingModalClips` refactored from `number[]` to `ClipRef[]` so cross-period meetings save with proper periodIds.
+19. **Goalies tab** — top-level view aggregating per-opposing-goalie GA database. Click goalie → all goals scored on them with strength/comment/source-game. Foundation for centermen-meeting goalie scout.
+20. **Clip download** — right-click clip → Download Clip. Records via `video.captureStream()` + `MediaRecorder` → `.webm` (or `.mp4` if browser supports). Filename: `{team}_{game}_{type}_{startTime}s.webm`.
+21. **Clips popout commenting** — detached clips window now has inline comment input per row. Edits broadcast `EVENT_COMMENT` back to main via existing channel; bidirectional sync.
+22. **Public assets** — `public/rinks/rink-blank.svg` (clean CorelDRAW NHL rink, no logo) + originals (`Rink Template.svg`, `center_ice_template (1).psd`).
+
 ---
 
 ## Coaching workflow + meeting taxonomy (added 2026-05-07)
@@ -154,13 +166,35 @@ Features (consume foundation):
 Sharing (Ben's 2026-05-07 ask):
 
 8. **Quick clip download** — `video.captureStream()` + `MediaRecorder` → `.webm` Blob → trigger download. Right-click "Download" in clip context menu. v2: FFmpeg.wasm for true MP4.
-9. **Firebase share infrastructure** — new `district-lab` Firebase project (Ben must create). Storage for MP4, Firestore for metadata. Unguessable UUID short URLs, optional 30-day expiry, no auth.
-10. **Clip share + viewer route** — `/share/[id]/page.tsx` renders read-only clip with caption/strength/comment overlay.
-11. **Meeting share** — same plumbing, multi-clip playlist.
+
+### NEW TOP PRIORITIES (added 2026-05-07 PM)
+
+**N1. Multi-coach accounts + shared projects (Hudl/Catapult-style).** Asked late-2026-05-07 evening. The Lab needs Firebase Auth (per-coach login) + Firestore replacing localStorage as the source of truth (so HC + AC1 + AC2 see the same tagged clips, meetings, rosters in real time). Per-team permissions ("HC on Triton, AC2 on Newburyport"). Migration path for existing localStorage data. **Architecture shift, ~6-8 hours, blocks all sharing items below.** Ben must create Firebase project first — see `FIREBASE_SETUP.md` at repo root.
+
+**N2. Settings page for clip-type config + per-code prompt-flow toggle.** Asked 2026-05-07 evening. New top-level "Settings" view (or panel). Per code (the 24 in `codes.ts`): editable label, hotkey, category, AND a prompt-flow toggle. When toggled on, hitting the hotkey opens a sequenced prompt:
+  - **Faceoff** prompt-flow spec: hotkey `f` (currently `x`) → opens modal → press `W`/`L` → press `H`/`N` for help/no-help → type jersey number + Enter for taker → tag committed with all metadata.
+  - Defaults are OFF for legacy codes (preserves current instant-tag behavior).
+  - Quickie Stats then drills down by these fields (W/L by strength/zone/player).
+  - Stored in localStorage as user overrides on top of `codes.ts` defaults. Eventually moves to Firestore (per N1).
+
+**N3. Firebase share + clip share + meeting share.** Same plumbing as N1 (Firebase Storage for MP4, Firestore for metadata). Once N1 lands, share is "set permissions doc on this clip/meeting + generate short URL." Without N1, sharing is hacky.
+
+**N4. Logo decal pipeline.** bg-removal on upload (RGB > 240 → alpha 0) + `mix-blend-mode: multiply` + drop shadow + opacity 0.9. Plus "Remove logo" button per team. Solves the District-logo-stacked-with-Triton-overlay problem we hit during testing.
+
+**N5. (Optional) District brand chrome.** Navy header strip + gold "District" wordmark. Per Ben's brand-vs-differentiation discussion 2026-05-07: do NOT change the workspace palette (emerald + semantic strength colors PP=yellow/PK=rose/EN=violet/OT=sky). Brand presence in chrome only. ~30 min.
+
+**N6. Auto-strength state machine + penalty tracking.** Per Ben 2026-05-07 evening: clips should auto-capture the actual on-ice strength at the moment they happen, not just inherit whatever the user last set in the selector. Approach: a "Game State" timeline that flips strength based on penalty events (start/end). Penalty becomes its own event type with duration. When a clip is tagged at time T, look up the strength state at T from the timeline, override the static `currentStrength` if a state exists. Manual override still allowed. Saves coach from constantly toggling the strength selector during PK/PP sequences.
+
+**N7. Autocutups confirmation (already partially built).** Ben confirmed 2026-05-07: existing prefix codes (`pk_iz`, `pk_fc`, `pp_breakout`, `pp_ozp`, etc.) ARE the autocutup pattern — XOS-style code naming where the prefix encodes strength implicitly. Meeting Templates filter (just fixed in this session) now matches both explicit Strength field AND prefix codes — `PK` template matches `strengthCategory==="PK" OR actionId.startsWith("pk_")`. Future autocutups will compose multiple prefix matches + strength + zone + player.
+
+### Older queue (pushed below new top priorities)
+
+10. **Clip share + viewer route** — `/share/[id]/page.tsx` renders read-only clip with caption/strength/comment overlay. Folds into N3.
+11. **Meeting share** — same plumbing, multi-clip playlist. Folds into N3.
 
 Polish + future:
 
-12. **Logo decal pipeline** — bg-removal on upload (RGB > 240 → alpha 0) + `mix-blend-mode: multiply` + drop shadow + opacity 0.9. Plus "Remove logo" button per team.
+12. **Logo decal pipeline** — see N4 above.
 13. **Systems library** — long-running teach archive, builds slowly across season. Cross-game searchable by concept (forecheck, breakout, NZ regroup, PP entry, PK retrieval, etc.).
 14. **PPT slide upload to meetings** — parse `.pptx`, render as title-card blocks.
 15. **Drag-and-drop clips into folders** (XOS Edits-folder pattern, beyond just meetings).

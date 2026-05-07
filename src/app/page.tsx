@@ -1913,14 +1913,16 @@ export default function DistrictPlatform() {
   function templateMatches(e: TaggedEvent, template: MeetingTemplate): boolean {
     switch (template) {
       case "5v5":
-        // Treat undefined strength as 5v5 (default for legacy clips)
+        // Even-strength only: explicit 5v5 OR no strength tag AND no special-team prefix code.
+        if (e.actionId.startsWith("pk_") || e.actionId.startsWith("pp_")) return false;
         return !e.strength || e.strength === "5v5";
       case "PK":
-        return strengthCategory(e.strength) === "PK";
+        // Strength PK OR explicit PK-prefix code (pk_iz, pk_fc) — autocutup pattern.
+        return strengthCategory(e.strength) === "PK" || e.actionId.startsWith("pk_");
       case "PP":
-        return strengthCategory(e.strength) === "PP";
+        // Strength PP OR explicit PP-prefix code (pp_breakout, pp_ozp).
+        return strengthCategory(e.strength) === "PP" || e.actionId.startsWith("pp_");
       case "Centermen":
-        // FOs (with or without W/L set) + goal-againsts where the goalie has been scouted
         return (
           e.actionId === "faceoff" ||
           (e.actionId === "goal_against" && Boolean(e.scoutedGoalie))
@@ -3366,12 +3368,12 @@ export default function DistrictPlatform() {
                           </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 text-[9px] font-mono text-slate-500 mb-1.5">
-                        <span>
+                      <div className="flex items-center gap-2 text-[11px] font-mono text-slate-300 mb-1.5">
+                        <span className="font-bold">
                           {e.start.toFixed(1)}s → {e.end.toFixed(1)}s
                         </span>
-                        <span className="text-slate-700">·</span>
-                        <span>{dur}s clip</span>
+                        <span className="text-slate-600">·</span>
+                        <span className="text-slate-400 font-bold">{dur}s</span>
                       </div>
                       <textarea
                         value={e.comment}
