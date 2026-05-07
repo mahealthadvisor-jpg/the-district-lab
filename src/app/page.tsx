@@ -2995,6 +2995,27 @@ export default function DistrictPlatform() {
                               </span>
                             );
                           })()}
+                          {e.actionId === "faceoff" && e.faceoffResult && (
+                            <span
+                              title={`Faceoff ${e.faceoffResult === "W" ? "Won" : "Lost"}`}
+                              className={`px-1 py-0 rounded border text-[9px] font-black ${
+                                e.faceoffResult === "W"
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                                  : "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                              }`}
+                            >
+                              {e.faceoffResult}
+                            </span>
+                          )}
+                          {e.actionId === "goal_against" && e.scoutedGoalie && (
+                            <span
+                              title={`Scouted goalie: ${e.scoutedGoalie}`}
+                              className="flex items-center gap-0.5 px-1 py-0 rounded border bg-amber-500/15 text-amber-300 border-amber-500/40 text-[8px] font-mono"
+                            >
+                              <Target size={9} />
+                              {e.scoutedGoalie}
+                            </span>
+                          )}
                           {e.trimmed && (
                             <span
                               title="Manually trimmed"
@@ -3760,6 +3781,69 @@ export default function DistrictPlatform() {
                     <span className="ml-auto text-[10px] font-mono text-slate-500">{ev.playerIds.length}</span>
                   )}
                 </button>
+                {ev.actionId === "faceoff" && (
+                  <>
+                    <button
+                      onClick={() => {
+                        closeContextMenu();
+                        setEvents((prev) =>
+                          prev.map((e) =>
+                            e.id === ev.id
+                              ? { ...e, faceoffResult: e.faceoffResult === "W" ? undefined : "W" }
+                              : e
+                          )
+                        );
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
+                    >
+                      <span className="w-3 text-center font-black text-emerald-400">W</span>
+                      {ev.faceoffResult === "W" ? "Clear Win" : "Mark Win"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        closeContextMenu();
+                        setEvents((prev) =>
+                          prev.map((e) =>
+                            e.id === ev.id
+                              ? { ...e, faceoffResult: e.faceoffResult === "L" ? undefined : "L" }
+                              : e
+                          )
+                        );
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
+                    >
+                      <span className="w-3 text-center font-black text-rose-400">L</span>
+                      {ev.faceoffResult === "L" ? "Clear Loss" : "Mark Loss"}
+                    </button>
+                  </>
+                )}
+                {ev.actionId === "goal_against" && (
+                  <button
+                    onClick={() => {
+                      closeContextMenu();
+                      const next = prompt(
+                        "Opposing goalie (e.g. \"#31 Smith\"):",
+                        ev.scoutedGoalie ?? ""
+                      );
+                      if (next === null) return;
+                      setEvents((prev) =>
+                        prev.map((e) =>
+                          e.id === ev.id
+                            ? { ...e, scoutedGoalie: next.trim() || undefined }
+                            : e
+                        )
+                      );
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
+                  >
+                    <Target size={13} className="text-amber-400" />
+                    Set Goalie… {ev.scoutedGoalie && (
+                      <span className="ml-auto text-[10px] font-mono text-slate-500 truncate max-w-[100px]">
+                        {ev.scoutedGoalie}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <div className="my-1 h-px bg-slate-800" />
                 <button
                   onClick={() => {

@@ -119,6 +119,10 @@ export interface TaggedEvent {
   strength?: Strength;
   /** IDs of your players on the ice / involved on this clip. Drives Centermen + player-driven filters. */
   playerIds?: string[];
+  /** Outcome of a faceoff. Only meaningful when actionId === "faceoff". */
+  faceoffResult?: "W" | "L";
+  /** Goalie scouted on this goal-against. Free-text for opposing goalie name (jersey + name). */
+  scoutedGoalie?: string;
 }
 
 export type SyncMessage =
