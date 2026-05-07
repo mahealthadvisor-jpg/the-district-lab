@@ -32,6 +32,9 @@ import {
   Copy,
   ArrowDownToLine,
   Percent,
+  Target,
+  Download,
+  Share2,
 } from "lucide-react";
 import CodeWindow from "@/components/CodeWindow";
 import RinkMap from "@/components/RinkMap";
@@ -61,6 +64,10 @@ interface Game {
   name: string;
   /** Multiple period files belonging to this game. Always at least one. */
   periods: Period[];
+  /** Opposing team name. Cumulative tape across multiple games of theirs is grouped by this. */
+  opponent?: string;
+  /** ISO date string of the game (YYYY-MM-DD). Optional but recommended for chronological pre-scout. */
+  date?: string;
 }
 interface Folder {
   id: string;
@@ -178,6 +185,94 @@ function walkFolders(folders: Folder[]): Folder[] {
   return out;
 }
 
+/** Aggregate stats per distinct opponent across all teams' games. Sorted by clip count desc. */
+function aggregateOpponents(
+  teams: Team[]
+): Array<{ name: string; clipCount: number; gameCount: number }> {
+  if (typeof window === "undefined") return [];
+  const map = new Map<string, { clipCount: number; gameCount: number }>();
+  for (const team of teams) {
+    for (const folder of walkFolders(team.folders)) {
+      for (const game of folder.games) {
+        if (!game.opponent) continue;
+        let totalClips = 0;
+        for (const period of game.periods) {
+          const raw = window.localStorage.getItem(`district_tags_${period.id}`);
+          if (raw) {
+            try {
+              totalClips += (JSON.parse(raw) as TaggedEvent[]).length;
+            } catch {
+              // ignore parse errors
+            }
+          }
+        }
+        const existing = map.get(game.opponent) ?? { clipCount: 0, gameCount: 0 };
+        existing.clipCount += totalClips;
+        existing.gameCount += 1;
+        map.set(game.opponent, existing);
+      }
+    }
+  }
+  return Array.from(map.entries())
+    .map(([name, stats]) => ({ name, ...stats }))
+    .sort((a, b) => b.clipCount - a.clipCount);
+}
+
+/** All clips against a given opponent, with provenance. Sorted by date desc, then by tag time. */
+function gatherOpponentClips(
+  teams: Team[],
+  opponent: string
+): Array<{
+  event: TaggedEvent;
+  gameId: string;
+  gameName: string;
+  gameDate?: string;
+  periodId: string;
+  periodLabel: string;
+}> {
+  if (typeof window === "undefined") return [];
+  const out: Array<{
+    event: TaggedEvent;
+    gameId: string;
+    gameName: string;
+    gameDate?: string;
+    periodId: string;
+    periodLabel: string;
+  }> = [];
+  for (const team of teams) {
+    for (const folder of walkFolders(team.folders)) {
+      for (const game of folder.games) {
+        if (game.opponent !== opponent) continue;
+        for (const period of game.periods) {
+          const raw = window.localStorage.getItem(`district_tags_${period.id}`);
+          if (!raw) continue;
+          try {
+            const events = JSON.parse(raw) as TaggedEvent[];
+            for (const ev of events) {
+              out.push({
+                event: ev,
+                gameId: game.id,
+                gameName: game.name,
+                gameDate: game.date,
+                periodId: period.id,
+                periodLabel: period.label,
+              });
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+    }
+  }
+  out.sort((a, b) => {
+    const dateCompare = (b.gameDate ?? "").localeCompare(a.gameDate ?? "");
+    if (dateCompare !== 0) return dateCompare;
+    return (b.event.time ?? 0) - (a.event.time ?? 0);
+  });
+  return out;
+}
+
 function folderIcon(kind: FolderKind) {
   if (kind === "season") return CalendarDays;
   if (kind === "practices") return Dumbbell;
@@ -212,7 +307,9 @@ function findPeriodPath(
 
 export default function DistrictPlatform() {
   const [currentView, setCurrentView] =
-    useState<"home" | "library" | "scout" | "meeting">("scout");
+    useState<"home" | "library" | "scout" | "meeting" | "opponents">("scout");
+  /** When in the Opponents view, the currently focused opponent name. Drives the aggregated clip list. */
+  const [selectedOpponent, setSelectedOpponent] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -1114,11 +1211,15 @@ export default function DistrictPlatform() {
   function addGame(folderId: string) {
     const name = prompt('Game / event name? (e.g. "vs Newburyport — 2026-03-12")');
     if (!name?.trim()) return;
+    const opp = prompt('Opponent (e.g. "Newburyport"). Leave blank for non-game events like practice.', "");
+    const date = prompt('Date (YYYY-MM-DD, optional)', new Date().toISOString().slice(0, 10));
     const id = `game-${Date.now()}`;
     const game: Game = {
       id,
       name: name.trim(),
       periods: [{ id: `${id}-full`, label: "Full Game" }],
+      opponent: opp?.trim() || undefined,
+      date: date?.trim() || undefined,
     };
     setTeams((prev) =>
       prev.map((t) => ({
@@ -1216,15 +1317,40 @@ export default function DistrictPlatform() {
       if (current) break;
     }
     if (!current) return;
-    const name = prompt("Rename game:", current.name);
-    if (!name?.trim()) return;
+    const name = prompt("Game name:", current.name);
+    if (name === null) return; // Cancel = abort
+    if (!name.trim()) return;
+    const opp = prompt("Opponent (blank for non-game events):", current.opponent ?? "");
+    if (opp === null) {
+      // Cancel after name = save name only
+      setTeams((prev) =>
+        prev.map((t) => ({
+          ...t,
+          folders: mapFoldersDeep(t.folders, (f) => ({
+            ...f,
+            games: f.games.map((g) =>
+              g.id === gameId ? { ...g, name: name.trim() } : g
+            ),
+          })),
+        }))
+      );
+      return;
+    }
+    const date = prompt("Date (YYYY-MM-DD, optional):", current.date ?? "");
     setTeams((prev) =>
       prev.map((t) => ({
         ...t,
         folders: mapFoldersDeep(t.folders, (f) => ({
           ...f,
           games: f.games.map((g) =>
-            g.id === gameId ? { ...g, name: name.trim() } : g
+            g.id === gameId
+              ? {
+                  ...g,
+                  name: name.trim(),
+                  opponent: opp.trim() || undefined,
+                  date: date?.trim() || undefined,
+                }
+              : g
           ),
         })),
       }))
@@ -1778,6 +1904,14 @@ export default function DistrictPlatform() {
             <span className="text-[11px] font-bold text-slate-200 truncate">
               {game.name}
             </span>
+            {game.opponent && (
+              <span
+                className="text-[8px] font-black uppercase tracking-wider px-1 py-0 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 shrink-0"
+                title={`Opponent: ${game.opponent}${game.date ? ` · ${game.date}` : ""}`}
+              >
+                vs {game.opponent}
+              </span>
+            )}
             {totalTags > 0 && (
               <span className="text-[9px] font-mono text-slate-500 bg-slate-900 px-1 py-0.5 rounded ml-auto">
                 {totalTags}
@@ -1877,6 +2011,7 @@ export default function DistrictPlatform() {
                 { id: "home", label: "Home", icon: Home },
                 { id: "library", label: "Library", icon: Library },
                 { id: "scout", label: "Scouting Lab", icon: Film },
+                { id: "opponents", label: "Opponents", icon: Target },
                 { id: "meeting", label: "Meetings", icon: Users },
               ] as const
             ).map((tab) => (
@@ -3014,6 +3149,156 @@ export default function DistrictPlatform() {
                   );
                 })}
               </div>
+            )}
+          </div>
+        </div>
+      ) : currentView === "opponents" ? (
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-950">
+          <div className="max-w-6xl mx-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-black uppercase italic">
+                Opponents
+                <span className="ml-3 text-base font-mono text-slate-500">
+                  {aggregateOpponents(teams).length} tracked
+                </span>
+              </h2>
+              <span className="text-xs text-slate-500 italic">
+                Cumulative pre-scout tape across multiple games of theirs.
+              </span>
+            </div>
+
+            {aggregateOpponents(teams).length === 0 ? (
+              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                <Target size={48} className="mx-auto text-slate-700 mb-4" />
+                <p className="text-slate-300 text-lg font-bold mb-2">
+                  No opponents tracked yet
+                </p>
+                <p className="text-slate-500 text-sm">
+                  Set the <span className="text-rose-400 font-bold">opponent</span> field on a game (rename a game and fill in the opponent prompt) and tape will start accumulating here.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6">
+                  {aggregateOpponents(teams).map((opp) => {
+                    const isSelected = selectedOpponent === opp.name;
+                    return (
+                      <button
+                        key={opp.name}
+                        onClick={() =>
+                          setSelectedOpponent(isSelected ? null : opp.name)
+                        }
+                        className={`p-4 rounded-xl border text-left transition-all ${
+                          isSelected
+                            ? "bg-rose-950/40 border-rose-500/60 ring-2 ring-rose-500/40"
+                            : "bg-slate-900/60 border-slate-800 hover:border-rose-500/50 hover:bg-slate-900"
+                        }`}
+                      >
+                        <div className="text-lg font-black uppercase italic text-slate-100 mb-1 truncate">
+                          vs {opp.name}
+                        </div>
+                        <div className="text-xs font-mono text-slate-400">
+                          {opp.clipCount} clip{opp.clipCount === 1 ? "" : "s"} · {opp.gameCount} game{opp.gameCount === 1 ? "" : "s"}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedOpponent &&
+                  (() => {
+                    const allClips = gatherOpponentClips(teams, selectedOpponent);
+                    return (
+                      <div className="bg-slate-900/40 rounded-xl border border-slate-800 p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-black uppercase tracking-wide text-rose-300">
+                            vs {selectedOpponent}
+                            <span className="ml-3 text-sm font-mono text-slate-500">
+                              {allClips.length} clip{allClips.length === 1 ? "" : "s"}
+                            </span>
+                          </h3>
+                          <button
+                            onClick={() => setSelectedOpponent(null)}
+                            className="text-xs text-slate-500 hover:text-slate-300"
+                          >
+                            Close
+                          </button>
+                        </div>
+
+                        {allClips.length === 0 ? (
+                          <div className="text-center py-8 text-slate-500 text-sm italic">
+                            No clips tagged yet against {selectedOpponent}. Tag some in any game vs them and they'll show up here automatically.
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-[60vh] overflow-y-auto pr-1">
+                            {allClips.map(({ event, gameName, gameDate, periodLabel, periodId }) => {
+                              const dotColor =
+                                CODE_COLORS[event.actionId] ?? "#10b981";
+                              const dur = (event.end - event.start).toFixed(1);
+                              return (
+                                <button
+                                  key={`${periodId}-${event.id}`}
+                                  onClick={() => {
+                                    // Jump into the source period and play that clip
+                                    const path = findPeriodPath(teams, periodId);
+                                    if (path) {
+                                      setSelectedGame(path.period);
+                                      setCurrentView("scout");
+                                      // Defer playClip until after the period loads its events
+                                      setTimeout(() => playClip(event.id), 300);
+                                    }
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-950 hover:bg-slate-900 text-left transition-colors"
+                                  style={{ boxShadow: `inset 4px 0 0 ${dotColor}` }}
+                                >
+                                  <span
+                                    className="w-2 h-2 rounded-full shrink-0"
+                                    style={{ background: dotColor }}
+                                  />
+                                  <span className="text-[11px] font-black text-slate-100 uppercase italic tracking-tight shrink-0">
+                                    {event.type}
+                                  </span>
+                                  {event.flagged && (
+                                    <Star
+                                      size={11}
+                                      className="text-amber-400 shrink-0"
+                                      fill="currentColor"
+                                    />
+                                  )}
+                                  {event.strength && event.strength !== "5v5" && (() => {
+                                    const cat = strengthCategory(event.strength);
+                                    const tint =
+                                      cat === "PP" ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                                      : cat === "PK" ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                                      : cat === "EN" ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
+                                      : "bg-sky-500/20 text-sky-300 border-sky-500/40";
+                                    return (
+                                      <span className={`px-1 py-0 rounded border text-[8px] font-black tracking-wider shrink-0 ${tint}`}>
+                                        {event.strength}
+                                      </span>
+                                    );
+                                  })()}
+                                  {event.comment && (
+                                    <span className="text-[10px] text-slate-400 italic truncate flex-1">
+                                      {event.comment}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] font-mono text-slate-500 ml-auto shrink-0 flex items-center gap-2">
+                                    <span>{dur}s</span>
+                                    <span className="text-slate-600">·</span>
+                                    <span className="truncate max-w-[180px]" title={`${gameName} · ${periodLabel}`}>
+                                      {gameName}{gameDate ? ` · ${gameDate}` : ""}
+                                    </span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+              </>
             )}
           </div>
         </div>
