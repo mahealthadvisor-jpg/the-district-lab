@@ -19,6 +19,64 @@ export interface Stroke {
   points: { x: number; y: number }[];
 }
 
+/** Granular on-ice strength state at the moment of a tagged event.
+ * Drives PK/PP/5v5 meeting filters. Defaults to "5v5" when absent.
+ * Format: "{us}v{them}" — perspective is always your team. So 5v4 = your PP, 4v5 = your PK. */
+export type Strength =
+  | "5v5"
+  | "5v4"
+  | "4v5"
+  | "5v3"
+  | "3v5"
+  | "4v3"
+  | "3v4"
+  | "4v4"
+  | "3v3"
+  | "6v5"
+  | "5v6"
+  | "Even";
+
+export const STRENGTHS: Strength[] = [
+  "5v5",
+  "5v4",
+  "4v5",
+  "5v3",
+  "3v5",
+  "4v4",
+  "3v3",
+  "4v3",
+  "3v4",
+  "6v5",
+  "5v6",
+  "Even",
+];
+
+/** Categorical grouping used by meeting templates. PP/PK perspective is always your team. */
+export function strengthCategory(s: Strength | undefined): "5v5" | "PP" | "PK" | "EN" | "OT" {
+  switch (s) {
+    case undefined:
+    case "5v5":
+      return "5v5";
+    case "5v4":
+    case "5v3":
+    case "4v3":
+      return "PP";
+    case "4v5":
+    case "3v5":
+    case "3v4":
+      return "PK";
+    case "6v5":
+    case "5v6":
+      return "EN";
+    case "Even":
+    case "4v4":
+    case "3v3":
+      return "OT";
+    default:
+      return "5v5";
+  }
+}
+
 /** A reference to a specific tagged clip across the data set. */
 export interface ClipRef {
   gameId: string;
@@ -57,6 +115,8 @@ export interface TaggedEvent {
   flagged?: boolean;
   /** True when start/end has been manually adjusted from the lead/lag defaults. */
   trimmed?: boolean;
+  /** On-ice strength state at the moment of the tag. Drives PK/PP/5v5 meeting filters. */
+  strength?: Strength;
 }
 
 export type SyncMessage =

@@ -37,7 +37,7 @@ import CodeWindow from "@/components/CodeWindow";
 import RinkMap from "@/components/RinkMap";
 import Telestration from "@/components/Telestration";
 import { ALL_ACTIONS, CODE_COLORS, CodeAction, matchesHotkey } from "@/lib/codes";
-import { CHANNEL_NAME, SyncMessage, Stroke, TaggedEvent, Meeting, ClipRef } from "@/lib/sync";
+import { CHANNEL_NAME, SyncMessage, Stroke, TaggedEvent, Meeting, ClipRef, Strength, STRENGTHS, strengthCategory } from "@/lib/sync";
 import {
   saveVideo,
   loadVideo,
@@ -256,6 +256,8 @@ export default function DistrictPlatform() {
   const [expandedGames, setExpandedGames] = useState<Set<string>>(new Set());
   const [events, setEvents] = useState<TaggedEvent[]>([]);
   const [activeManualTags, setActiveManualTags] = useState<Record<string, number>>({});
+  /** Current on-ice strength applied to new tags. Defaults to 5v5. Persists per-period in localStorage. */
+  const [currentStrength, setCurrentStrength] = useState<Strength>("5v5");
   const [pendingLocateId, setPendingLocateId] = useState<number | null>(null);
   const [pipActive, setPipActive] = useState(false);
   const [storageUsed, setStorageUsed] = useState<{ used: number; quota: number } | null>(null);
@@ -398,6 +400,19 @@ export default function DistrictPlatform() {
     if (!isClient) return;
     localStorage.setItem("district_meetings", JSON.stringify(meetings));
   }, [meetings, isClient]);
+
+  // Load saved current strength on mount, persist on change
+  useEffect(() => {
+    if (!isClient) return;
+    const raw = localStorage.getItem("district_current_strength");
+    if (raw && (STRENGTHS as string[]).includes(raw)) {
+      setCurrentStrength(raw as Strength);
+    }
+  }, [isClient]);
+  useEffect(() => {
+    if (!isClient) return;
+    localStorage.setItem("district_current_strength", currentStrength);
+  }, [currentStrength, isClient]);
 
   useEffect(() => {
     if (!isClient || !selectedGame) return;
@@ -781,6 +796,7 @@ export default function DistrictPlatform() {
             end: now,
             comment: "",
             gameId: selectedGame.id,
+            strength: currentStrength,
           };
           setEvents((prev) => [evt, ...prev]);
           setActiveManualTags((prev) => {
@@ -819,6 +835,7 @@ export default function DistrictPlatform() {
           end: now + post,
           comment: "",
           gameId: selectedGame.id,
+          strength: currentStrength,
         };
         setEvents((prev) => [evt, ...prev]);
         channelRef.current?.postMessage({
@@ -2337,6 +2354,37 @@ export default function DistrictPlatform() {
                         <ExternalLink size={14} /> Detach Tags
                       </button>
                     </div>
+                    <div className="mb-2 flex flex-wrap gap-1 items-center px-1 py-1.5 rounded-md bg-slate-950/50 border border-slate-800/60">
+                      <span className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 mr-1.5">Strength</span>
+                      {STRENGTHS.map((s) => {
+                        const sel = currentStrength === s;
+                        const isPP = s === "5v4" || s === "5v3" || s === "4v3";
+                        const isPK = s === "4v5" || s === "3v5" || s === "3v4";
+                        const isEN = s === "6v5" || s === "5v6";
+                        const isOT = s === "4v4" || s === "3v3";
+                        const tint = sel
+                          ? "bg-emerald-500 text-slate-950 border-emerald-400"
+                          : isPP
+                          ? "bg-yellow-900/20 text-yellow-300 border-yellow-700/40 hover:bg-yellow-700/30"
+                          : isPK
+                          ? "bg-rose-900/20 text-rose-300 border-rose-700/40 hover:bg-rose-700/30"
+                          : isEN
+                          ? "bg-violet-900/20 text-violet-300 border-violet-700/40 hover:bg-violet-700/30"
+                          : isOT
+                          ? "bg-sky-900/20 text-sky-300 border-sky-700/40 hover:bg-sky-700/30"
+                          : "bg-slate-800/60 text-slate-300 border-slate-700/60 hover:bg-slate-700";
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => setCurrentStrength(s)}
+                            title={`Tag new clips as ${s}`}
+                            className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider border transition-colors ${tint}`}
+                          >
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
                     <CodeWindow activeManualTags={activeManualTags} onTag={handleTag} />
                   </>
                 )}
@@ -2680,6 +2728,22 @@ export default function DistrictPlatform() {
                               aria-label="Flagged"
                             />
                           )}
+                          {e.strength && e.strength !== "5v5" && (() => {
+                            const cat = strengthCategory(e.strength);
+                            const tint =
+                              cat === "PP" ? "bg-yellow-500/20 text-yellow-300 border-yellow-500/40"
+                              : cat === "PK" ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                              : cat === "EN" ? "bg-violet-500/20 text-violet-300 border-violet-500/40"
+                              : "bg-sky-500/20 text-sky-300 border-sky-500/40";
+                            return (
+                              <span
+                                title={`Strength: ${e.strength} (${cat})`}
+                                className={`px-1 py-0 rounded border text-[8px] font-black tracking-wider ${tint}`}
+                              >
+                                {e.strength}
+                              </span>
+                            );
+                          })()}
                           {e.trimmed && (
                             <span
                               title="Manually trimmed"
@@ -2783,6 +2847,29 @@ export default function DistrictPlatform() {
                       <ArrowDownToLine size={11} /> Add to…
                     </button>
                   )}
+                  <select
+                    value=""
+                    onChange={(ev) => {
+                      const next = ev.target.value as Strength;
+                      if (!next) return;
+                      const ids = selectedClipIds;
+                      setEvents((prev) =>
+                        prev.map((evt) =>
+                          ids.has(evt.id) ? { ...evt, strength: next } : evt
+                        )
+                      );
+                      ev.target.value = "";
+                    }}
+                    title="Set strength on all selected clips"
+                    className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-emerald-500 text-slate-100 text-[10px] font-black uppercase tracking-widest cursor-pointer appearance-none"
+                  >
+                    <option value="">Set strength…</option>
+                    {STRENGTHS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     onClick={() => openMeetingModal(Array.from(selectedClipIds))}
                     className="flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest"
