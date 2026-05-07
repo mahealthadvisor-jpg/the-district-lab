@@ -219,6 +219,51 @@ Newburyport (Team)/
 
 **Effort:** ~4-6 hr after Firestore migration (since folder tree lives in Firestore post-N1).
 
+**N8 update 2026-05-07 (after Ben shared XOS Folder Templates Manager screenshots):** Lock the full XOS-faithful structure below. Rationale (per Ben): "it's that way so the data is easily accessed later" — the numbered prefixes + unit nesting are deliberate retrieval optimizations, don't simplify them.
+
+```
+01 Newburyport (Team)/
+  01 2025-26 Season/
+    00 Masters/
+    01 Self Scout/
+      01 Games/                   ← your tagged games this season
+      02 Autocutups/              ← preset filter rules from Settings (PK/PP/5v5/etc)
+      03 Wildcard Cutups/         ← ad-hoc user-built filters
+      04 Hot Folder/              ← raw-video drop zone (LiveBarn exports etc)
+      05 Practice/
+    02 Opponent Scout/
+      01 Triton/                  ← stamped per opponent from "Opponent Scout" template
+        01 Prescout/
+          01 Games/                ← raw opponent video imports
+          02 Autocutups/           ← scope: prescout clips (their PKFC/PP/etc)
+          03 Wildcard Cutups/
+          04 Hot Folder/
+        02 Games vs Us/
+          01 Games/                ← your games tagged against them
+          02 Autocutups/           ← scope: your tape across all games vs Triton
+          03 Wildcard Cutups/
+          04 Hot Folder/
+        03 Reports/                ← written scouting assessments (text, not clip playlists)
+      02 Methuen/  [paste]
+      03 Andover/
+    03 Reporting/                  ← season-level reports
+    04 Player Development/         ← commercial client work (polish bar matters)
+      01 Client A/
+      02 Client B/
+  02 2024-25 Season/  [archived prior season, same skeleton]
+```
+
+**Conventions:**
+- Numbered prefixes everywhere force sort order; don't rely on alphabetical
+- Hot Folder = drop zone for raw imports, periodic move-out ritual
+- Autocutups vs Wildcard Cutups: Autocutups are preset filter rules from the Settings page (N2). Wildcard Cutups are user-built ad-hoc filters that don't deserve a permanent slot.
+- Reports (per-opponent) ≠ Meetings — Reports are written assessments, Meetings are clip playlists
+- Player Development is its own top-level Game Plan category — commercial client polish bar applies here
+
+**XOS-style "Paste" workflow:** Build the "Opponent Scout" template once. New opponent? Pick template → name new top-level folder → Paste → entire skeleton stamps + auto-renames. This is how XOS does it; replicate the UX.
+
+**The Hot Folder concept is new** — currently Lab has no equivalent. Add it: drag a raw video file into Hot Folder, list it there until user moves to a proper home (or auto-organize by some rule).
+
 ### Older queue (pushed below new top priorities)
 
 10. **Clip share + viewer route** — `/share/[id]/page.tsx` renders read-only clip with caption/strength/comment overlay. Folds into N3.
