@@ -93,6 +93,8 @@ export interface TaggedEvent {
   id: number;
   type: string;     // human label ("Goal For", "DZC", ...)
   actionId: string; // CodeAction.id
+  /** Team this event belongs to (for permission scoping). Added Phase 1C. Optional for legacy local events. */
+  teamId?: string;
   /** Original tag time (when the user pressed the hotkey). */
   time?: number;
   /** Lead/lag seconds at tag time — used to recompute defaults if user "Removes Trim". */

@@ -3,9 +3,11 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import * as eventsStore from "@/lib/events-store";
+import * as teamsStore from "@/lib/teams-store";
 import {
   collectLocalEvents,
   hasMigrationRun,
+  hasTeamsMigrationRun,
   runMigration,
   dismissMigration,
 } from "@/lib/migration";
@@ -61,46 +63,8 @@ import {
   loadTeamLogo,
 } from "@/lib/video-store";
 
-type FolderKind = "season" | "practices" | "games" | "meetings" | "custom";
-
-interface Period {
-  id: string;
-  label: string; // "P1", "P2", "Full Game", etc.
-  file?: string; // optional path for legacy/static videos
-}
-interface Game {
-  id: string;
-  name: string;
-  /** Multiple period files belonging to this game. Always at least one. */
-  periods: Period[];
-  /** Opposing team name. Cumulative tape across multiple games of theirs is grouped by this. */
-  opponent?: string;
-  /** ISO date string of the game (YYYY-MM-DD). Optional but recommended for chronological pre-scout. */
-  date?: string;
-}
-interface Folder {
-  id: string;
-  name: string;
-  kind: FolderKind;
-  /** Nested sub-folders. e.g. a Season folder can contain Games / Practices / Player Meetings. */
-  subFolders: Folder[];
-  games: Game[];
-}
-interface Player {
-  id: string;
-  jersey: string;
-  name: string;
-  position?: "F" | "D" | "G";
-  /** Centerman flag — used by Centermen Meeting auto-pull. F-only. */
-  centerman?: boolean;
-}
-interface Team {
-  id: string;
-  name: string;
-  folders: Folder[];
-  /** Roster of the team's players. Each clip may tag any subset of these via TaggedEvent.playerIds. */
-  roster?: Player[];
-}
+// Team data model types now live in @/lib/team-types so teams-store.ts can use them too (Phase 1C).
+import type { FolderKind, Period, Game, Folder, Player, Team } from "@/lib/team-types";
 
 const DEFAULT_TEAMS: Team[] = [
   {
@@ -648,6 +612,57 @@ export default function DistrictPlatform() {
     if (isClient) localStorage.setItem("district_teams", JSON.stringify(teams));
   }, [teams, isClient]);
 
+  // ====== Phase 1C: subscribe to teams from Firestore + auto-sync local mutations ======
+  /** Last team array that came from Firestore (or that we wrote to it). Used to detect deltas. */
+  const teamsLastSyncedRef = useRef<Team[]>([]);
+  /** True when the most recent setTeams was triggered by a Firestore subscription update. Skip the sync writeback in that case. */
+  const teamsFromCloudRef = useRef(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsub = teamsStore.subscribeToMyTeams(user.uid, (cloudTeams) => {
+      // Don't clobber local data on first sign-in if cloud is empty + migration pending.
+      if (cloudTeams.length === 0 && !hasTeamsMigrationRun()) return;
+      teamsFromCloudRef.current = true;
+      setTeams(cloudTeams);
+      teamsLastSyncedRef.current = cloudTeams;
+      // Re-expand teams/folders if subscription brought new ones
+      setExpandedTeams((prev) => {
+        const next = new Set(prev);
+        for (const t of cloudTeams) next.add(t.id);
+        return next;
+      });
+    });
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !isClient) return;
+    if (teamsFromCloudRef.current) {
+      teamsFromCloudRef.current = false;
+      return;
+    }
+    // Only sync after migration has run (otherwise we'd keep writing then immediately get empty back)
+    if (!hasTeamsMigrationRun()) return;
+    const last = teamsLastSyncedRef.current;
+    const lastById = new Map(last.map((t) => [t.id, t]));
+    const currentById = new Map(teams.map((t) => [t.id, t]));
+    // Adds + updates
+    for (const t of teams) {
+      const old = lastById.get(t.id);
+      if (!old || JSON.stringify(old) !== JSON.stringify(t)) {
+        teamsStore.saveTeam(t, user.uid).catch((err) => console.error("Cloud team save failed:", err));
+      }
+    }
+    // Deletes
+    for (const t of last) {
+      if (!currentById.has(t.id)) {
+        teamsStore.deleteTeam(t.id).catch((err) => console.error("Cloud team delete failed:", err));
+      }
+    }
+    teamsLastSyncedRef.current = teams;
+  }, [teams, user, isClient]);
+
   // Load saved meetings on mount
   useEffect(() => {
     if (!isClient) return;
@@ -1075,6 +1090,7 @@ export default function DistrictPlatform() {
       if (action.mode === "manual") {
         if (activeManualTags[action.id] !== undefined) {
           const start = activeManualTags[action.id];
+          const teamId = findPeriodPath(teams, selectedGame.id)?.team.id;
           const evt: TaggedEvent = {
             id: Date.now(),
             type: action.label,
@@ -1086,6 +1102,7 @@ export default function DistrictPlatform() {
             end: now,
             comment: "",
             gameId: selectedGame.id,
+            teamId,
             strength: currentStrength,
           };
           setEvents((prev) => [evt, ...prev]);
@@ -1115,6 +1132,7 @@ export default function DistrictPlatform() {
       } else {
         const pre = action.pre ?? 5;
         const post = action.post ?? 5;
+        const teamId = findPeriodPath(teams, selectedGame.id)?.team.id;
         const evt: TaggedEvent = {
           id: Date.now(),
           type: action.label,
@@ -1126,6 +1144,7 @@ export default function DistrictPlatform() {
           end: now + post,
           comment: "",
           gameId: selectedGame.id,
+          teamId,
           strength: currentStrength,
         };
         setEvents((prev) => [evt, ...prev]);
@@ -1214,6 +1233,7 @@ export default function DistrictPlatform() {
         end: current.capturedTime + post,
         comment: "",
         gameId: selectedGame.id,
+        teamId: path?.team.id,
         strength: current.capturedStrength,
         faceoffResult: current.result,
         faceoffHelp: current.help,
