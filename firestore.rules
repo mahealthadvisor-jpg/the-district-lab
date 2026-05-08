@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Coach profiles (/users/{uid}). A coach can only read/write their own.
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Phase 1A baseline (N1 v1): any authenticated user can read/write
+    // everything else. This will be tightened to per-team membership in
+    // Phase 1B/1C when we move teams + tagged events + meetings to Firestore.
+    //
+    // SAFE because right now only the project owner has accounts. Lock down
+    // BEFORE inviting assistant coaches.
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

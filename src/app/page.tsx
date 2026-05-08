@@ -1,5 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth";
 import {
   Activity,
   HardDrive,
@@ -410,6 +412,15 @@ function findPeriodPath(
 }
 
 export default function DistrictPlatform() {
+  // Auth gate — redirect to /login if not signed in. (N1 multi-coach foundation.)
+  const router = useRouter();
+  const { user, profile, loading: authLoading, signOut } = useAuth();
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.replace("/login");
+    }
+  }, [authLoading, user, router]);
+
   const [currentView, setCurrentView] =
     useState<"home" | "library" | "scout" | "meeting" | "opponents" | "goalies">("scout");
   /** When in the Opponents view, the currently focused opponent name. Drives the aggregated clip list. */
@@ -2472,6 +2483,19 @@ export default function DistrictPlatform() {
 
   if (!isClient) return null;
 
+  // Auth gate render — show loading while resolving, render nothing while redirecting to /login.
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-500 font-mono text-xs uppercase tracking-widest">
+        Loading…
+      </div>
+    );
+  }
+  if (!user) {
+    // useEffect above is redirecting; render nothing to avoid flashing the lab UI.
+    return null;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100 font-sans selection:bg-emerald-500/30">
       <header className="border-b border-slate-800 bg-slate-950 px-6 py-3 flex items-center justify-between shadow-2xl z-30 shrink-0">
@@ -2516,6 +2540,23 @@ export default function DistrictPlatform() {
           >
             <HardDrive size={14} className="text-amber-500" /> {storageLabel}
           </div>
+          {profile && (
+            <div className="flex items-center gap-2 bg-slate-900 pl-3 pr-1 py-1 rounded-full border border-slate-800 text-[11px] font-mono font-bold">
+              <span className="text-slate-300 truncate max-w-[140px]" title={profile.email}>
+                {profile.displayName}
+              </span>
+              <button
+                onClick={async () => {
+                  await signOut();
+                  router.replace("/login");
+                }}
+                title="Sign out"
+                className="px-2.5 py-1 rounded-full bg-slate-800 hover:bg-rose-600 hover:text-white text-slate-400 text-[10px] font-black uppercase tracking-widest transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
