@@ -420,6 +420,15 @@ export default function DistrictPlatform() {
   const [rosterModalTeamId, setRosterModalTeamId] = useState<string | null>(null);
   /** Clip whose player tags are being edited in the modal. null = closed. */
   const [playerTagModalClipId, setPlayerTagModalClipId] = useState<number | null>(null);
+  /** When non-null, the faceoff prompt-flow modal is open. Hard-coded for faceoff in v1; per-code prompt-flow config (N2) lives in Settings later. */
+  const [pendingFaceoffPrompt, setPendingFaceoffPrompt] = useState<{
+    capturedTime: number;
+    capturedStrength: Strength;
+    step: "result" | "help" | "jersey";
+    result?: "W" | "L";
+    help?: boolean;
+    jersey: string;
+  } | null>(null);
   const [isClient, setIsClient] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -990,6 +999,18 @@ export default function DistrictPlatform() {
     (action: CodeAction) => {
       if (currentView !== "scout") return;
       const now = videoRef.current?.currentTime ?? 0;
+      // Faceoff has a prompt-flow (N2 v1 — hard-coded; later moves to Settings per-code config).
+      // Open the modal instead of tagging immediately. Tag is committed once user supplies W/L + help + jersey.
+      if (action.id === "faceoff") {
+        videoRef.current?.pause();
+        setPendingFaceoffPrompt({
+          capturedTime: now,
+          capturedStrength: currentStrength,
+          step: "result",
+          jersey: "",
+        });
+        return;
+      }
       if (action.mode === "manual") {
         if (activeManualTags[action.id] !== undefined) {
           const start = activeManualTags[action.id];
@@ -1052,7 +1073,7 @@ export default function DistrictPlatform() {
         } satisfies SyncMessage);
       }
     },
-    [activeManualTags, currentView, selectedGame.id]
+    [activeManualTags, currentView, selectedGame.id, currentStrength]
   );
 
   useEffect(() => {
@@ -1062,6 +1083,9 @@ export default function DistrictPlatform() {
         e.target instanceof HTMLTextAreaElement
       )
         return;
+      // Block all global hotkeys while the faceoff prompt-flow modal is open;
+      // it has its own keyboard handlers for W/L/H/N/digits/Enter/Esc.
+      if (pendingFaceoffPrompt) return;
       if (e.key === " ") {
         e.preventDefault();
         const v = videoRef.current;
@@ -1090,7 +1114,7 @@ export default function DistrictPlatform() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleTag, activeClipId]);
+  }, [handleTag, activeClipId, pendingFaceoffPrompt]);
 
   const playClip = useCallback((eventId: number) => {
     const v = videoRef.current;
@@ -1102,6 +1126,81 @@ export default function DistrictPlatform() {
     setDrawActive(false);
     setDrawBuffer([]);
   }, []);
+
+  // ====== Faceoff prompt-flow commit ======
+  /** Build the faceoff TaggedEvent from collected prompt data + close modal + resume video. */
+  const commitFaceoffPrompt = useCallback(() => {
+    setPendingFaceoffPrompt((current) => {
+      if (!current || !current.result) return current;
+      const action = ALL_ACTIONS.find((a) => a.id === "faceoff");
+      if (!action) return null;
+      const pre = action.pre ?? 10;
+      const post = action.post ?? 10;
+      const path = findPeriodPath(teams, selectedGame.id);
+      const player = current.jersey
+        ? path?.team.roster?.find((p) => p.jersey === current.jersey.trim())
+        : undefined;
+      const evt: TaggedEvent = {
+        id: Date.now(),
+        type: action.label,
+        actionId: action.id,
+        time: current.capturedTime,
+        lead: pre,
+        lag: post,
+        start: Math.max(0, current.capturedTime - pre),
+        end: current.capturedTime + post,
+        comment: "",
+        gameId: selectedGame.id,
+        strength: current.capturedStrength,
+        faceoffResult: current.result,
+        faceoffHelp: current.help,
+        playerIds: player ? [player.id] : undefined,
+      };
+      setEvents((prev) => [evt, ...prev]);
+      channelRef.current?.postMessage({
+        type: "TAG_ADDED",
+        event: evt,
+      } satisfies SyncMessage);
+      // Resume video best-effort
+      videoRef.current?.play().catch(() => {});
+      return null;
+    });
+  }, [teams, selectedGame.id]);
+  /** Modal keyboard handlers — fires while pendingFaceoffPrompt is non-null. */
+  useEffect(() => {
+    if (!pendingFaceoffPrompt) return;
+    const handler = (e: KeyboardEvent) => {
+      // Esc — abort, no tag created
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPendingFaceoffPrompt(null);
+        return;
+      }
+      // Jersey input handles its own keydown (it's focused), so skip here when on that step
+      if (e.target instanceof HTMLInputElement) return;
+      if (pendingFaceoffPrompt.step === "result") {
+        const k = e.key.toLowerCase();
+        if (k === "w") {
+          e.preventDefault();
+          setPendingFaceoffPrompt({ ...pendingFaceoffPrompt, result: "W", step: "help" });
+        } else if (k === "l") {
+          e.preventDefault();
+          setPendingFaceoffPrompt({ ...pendingFaceoffPrompt, result: "L", step: "help" });
+        }
+      } else if (pendingFaceoffPrompt.step === "help") {
+        const k = e.key.toLowerCase();
+        if (k === "h") {
+          e.preventDefault();
+          setPendingFaceoffPrompt({ ...pendingFaceoffPrompt, help: true, step: "jersey" });
+        } else if (k === "n") {
+          e.preventDefault();
+          setPendingFaceoffPrompt({ ...pendingFaceoffPrompt, help: false, step: "jersey" });
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [pendingFaceoffPrompt]);
 
   // ====== Clip Download ======
   /** ID of the clip currently being recorded for download. null = idle. Used to disable other downloads + show spinner. */
@@ -3290,7 +3389,7 @@ export default function DistrictPlatform() {
                           })()}
                           {e.actionId === "faceoff" && e.faceoffResult && (
                             <span
-                              title={`Faceoff ${e.faceoffResult === "W" ? "Won" : "Lost"}`}
+                              title={`Faceoff ${e.faceoffResult === "W" ? "Won" : "Lost"}${e.faceoffHelp !== undefined ? ` · ${e.faceoffHelp ? "with help" : "no help"}` : ""}`}
                               className={`px-1 py-0 rounded border text-[9px] font-black ${
                                 e.faceoffResult === "W"
                                   ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
@@ -3298,6 +3397,18 @@ export default function DistrictPlatform() {
                               }`}
                             >
                               {e.faceoffResult}
+                            </span>
+                          )}
+                          {e.actionId === "faceoff" && e.faceoffHelp !== undefined && (
+                            <span
+                              title={e.faceoffHelp ? "Winger helped" : "No help on faceoff"}
+                              className={`px-1 py-0 rounded border text-[9px] font-black ${
+                                e.faceoffHelp
+                                  ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                                  : "bg-slate-700/30 text-slate-400 border-slate-600/40"
+                              }`}
+                            >
+                              {e.faceoffHelp ? "H" : "N"}
                             </span>
                           )}
                           {e.actionId === "goal_against" && e.scoutedGoalie && (
@@ -4770,6 +4881,214 @@ export default function DistrictPlatform() {
             </div>
           );
         })()}
+
+      {/* ====== Faceoff Prompt-Flow Modal (N2 v1) ====== */}
+      {pendingFaceoffPrompt && (
+        <div
+          className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4"
+        >
+          <div
+            className="bg-slate-900 border-2 border-sky-500/60 rounded-2xl shadow-2xl w-full max-w-md p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-lg font-black uppercase italic tracking-wide text-sky-300">
+                  Faceoff
+                </h2>
+                <p className="text-[11px] font-mono text-slate-500 mt-0.5">
+                  Captured at {pendingFaceoffPrompt.capturedTime.toFixed(1)}s · {pendingFaceoffPrompt.capturedStrength}
+                </p>
+              </div>
+              <button
+                onClick={() => setPendingFaceoffPrompt(null)}
+                title="Esc"
+                className="p-2 rounded hover:bg-slate-800 text-slate-400 hover:text-white"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {/* Step 1: W/L */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  pendingFaceoffPrompt.step === "result"
+                    ? "border-sky-500 bg-sky-500/10"
+                    : "border-slate-800 bg-slate-950"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    1 · Result
+                  </span>
+                  {pendingFaceoffPrompt.result && (
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        pendingFaceoffPrompt.result === "W"
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          : "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                      }`}
+                    >
+                      {pendingFaceoffPrompt.result === "W" ? "WON" : "LOST"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      setPendingFaceoffPrompt({
+                        ...pendingFaceoffPrompt,
+                        result: "W",
+                        step: "help",
+                      })
+                    }
+                    className={`flex-1 py-2 rounded font-black text-sm ${
+                      pendingFaceoffPrompt.result === "W"
+                        ? "bg-emerald-500 text-slate-950"
+                        : "bg-slate-800 text-slate-300 hover:bg-emerald-600 hover:text-white"
+                    }`}
+                  >
+                    W · Won
+                  </button>
+                  <button
+                    onClick={() =>
+                      setPendingFaceoffPrompt({
+                        ...pendingFaceoffPrompt,
+                        result: "L",
+                        step: "help",
+                      })
+                    }
+                    className={`flex-1 py-2 rounded font-black text-sm ${
+                      pendingFaceoffPrompt.result === "L"
+                        ? "bg-rose-500 text-white"
+                        : "bg-slate-800 text-slate-300 hover:bg-rose-600 hover:text-white"
+                    }`}
+                  >
+                    L · Lost
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2: Help */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  pendingFaceoffPrompt.step === "help"
+                    ? "border-sky-500 bg-sky-500/10"
+                    : pendingFaceoffPrompt.help !== undefined
+                    ? "border-slate-700 bg-slate-950"
+                    : "border-slate-800 bg-slate-950 opacity-50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    2 · Winger Help?
+                  </span>
+                  {pendingFaceoffPrompt.help !== undefined && (
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        pendingFaceoffPrompt.help
+                          ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          : "bg-slate-700/30 text-slate-400 border border-slate-600/40"
+                      }`}
+                    >
+                      {pendingFaceoffPrompt.help ? "HELP" : "NO HELP"}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      setPendingFaceoffPrompt({
+                        ...pendingFaceoffPrompt,
+                        help: true,
+                        step: pendingFaceoffPrompt.step === "help" ? "jersey" : pendingFaceoffPrompt.step,
+                      })
+                    }
+                    disabled={!pendingFaceoffPrompt.result}
+                    className={`flex-1 py-2 rounded font-black text-sm disabled:opacity-30 disabled:cursor-not-allowed ${
+                      pendingFaceoffPrompt.help === true
+                        ? "bg-emerald-500 text-slate-950"
+                        : "bg-slate-800 text-slate-300 hover:bg-emerald-600 hover:text-white"
+                    }`}
+                  >
+                    H · Help
+                  </button>
+                  <button
+                    onClick={() =>
+                      setPendingFaceoffPrompt({
+                        ...pendingFaceoffPrompt,
+                        help: false,
+                        step: pendingFaceoffPrompt.step === "help" ? "jersey" : pendingFaceoffPrompt.step,
+                      })
+                    }
+                    disabled={!pendingFaceoffPrompt.result}
+                    className={`flex-1 py-2 rounded font-black text-sm disabled:opacity-30 disabled:cursor-not-allowed ${
+                      pendingFaceoffPrompt.help === false
+                        ? "bg-slate-600 text-white"
+                        : "bg-slate-800 text-slate-300 hover:bg-slate-600 hover:text-white"
+                    }`}
+                  >
+                    N · No Help
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 3: Jersey */}
+              <div
+                className={`p-3 rounded-lg border transition-all ${
+                  pendingFaceoffPrompt.step === "jersey"
+                    ? "border-sky-500 bg-sky-500/10"
+                    : "border-slate-800 bg-slate-950 opacity-50"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    3 · Centerman # · <span className="text-slate-600 normal-case font-mono">type + Enter to commit (blank = skip)</span>
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus={pendingFaceoffPrompt.step === "jersey"}
+                  value={pendingFaceoffPrompt.jersey}
+                  onChange={(e) =>
+                    setPendingFaceoffPrompt({
+                      ...pendingFaceoffPrompt,
+                      jersey: e.target.value.replace(/\D/g, "").slice(0, 3),
+                    })
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitFaceoffPrompt();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setPendingFaceoffPrompt(null);
+                    }
+                  }}
+                  disabled={pendingFaceoffPrompt.step !== "jersey"}
+                  placeholder="#"
+                  className="w-full bg-slate-950 border-2 border-slate-700 focus:border-sky-500 rounded px-3 py-2 text-2xl font-black text-center text-slate-100 placeholder:text-slate-700 font-mono focus:outline-none disabled:opacity-50"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between">
+              <span className="text-[10px] font-mono text-slate-500">
+                Esc to cancel
+              </span>
+              <button
+                onClick={commitFaceoffPrompt}
+                disabled={!pendingFaceoffPrompt.result}
+                className="px-4 py-2 rounded bg-sky-500 hover:bg-sky-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 text-xs font-black uppercase tracking-widest disabled:cursor-not-allowed"
+              >
+                Commit Faceoff ↵
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

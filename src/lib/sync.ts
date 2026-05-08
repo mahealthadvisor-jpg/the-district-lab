@@ -118,6 +118,8 @@ export interface TaggedEvent {
   playerIds?: string[];
   /** Outcome of a faceoff. Only meaningful when actionId === "faceoff". */
   faceoffResult?: "W" | "L";
+  /** Whether a winger helped on the faceoff (dug it out, supported). Only on faceoff. */
+  faceoffHelp?: boolean;
   /** Goalie scouted on this goal-against. Free-text for opposing goalie name (jersey + name). */
   scoutedGoalie?: string;
 }
