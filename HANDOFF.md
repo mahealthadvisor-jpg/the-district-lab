@@ -171,11 +171,27 @@ Sharing (Ben's 2026-05-07 ask):
 
 **N1. Multi-coach accounts + shared projects (Hudl/Catapult-style).** Asked late-2026-05-07 evening. The Lab needs Firebase Auth (per-coach login) + Firestore replacing localStorage as the source of truth (so HC + AC1 + AC2 see the same tagged clips, meetings, rosters in real time). Per-team permissions ("HC on Triton, AC2 on Newburyport"). Migration path for existing localStorage data. **Architecture shift, ~6-8 hours, blocks all sharing items below.** Ben must create Firebase project first — see `FIREBASE_SETUP.md` at repo root.
 
-**N2. Settings page for clip-type config + per-code prompt-flow toggle.** Asked 2026-05-07 evening. New top-level "Settings" view (or panel). Per code (the 24 in `codes.ts`): editable label, hotkey, category, AND a prompt-flow toggle. When toggled on, hitting the hotkey opens a sequenced prompt:
-  - **Faceoff** prompt-flow spec: hotkey `f` (currently `x`) → opens modal → press `W`/`L` → press `H`/`N` for help/no-help → type jersey number + Enter for taker → tag committed with all metadata.
-  - Defaults are OFF for legacy codes (preserves current instant-tag behavior).
-  - Quickie Stats then drills down by these fields (W/L by strength/zone/player).
-  - Stored in localStorage as user overrides on top of `codes.ts` defaults. Eventually moves to Firestore (per N1).
+**N2. Settings page for clip-type config + per-code prompt-flow toggle.** Asked 2026-05-07 evening. New top-level "Settings" view. Per code (the 24 in `codes.ts`): editable label, hotkey, category, AND a prompt-flow toggle.
+
+**Behavior when prompt-flow is toggled ON for a code (per Ben late-2026-05-07):**
+- Hitting the hotkey **auto-pops a modal** — coach stays in flow, no right-click needed.
+- All inputs keyboard-driven so coach can rapid-fire tag during a film session.
+- Modal pauses video while open; Esc cancels without creating tag; Enter commits.
+- Once submitted, tag created with full metadata, modal closes, video resumes (or stays paused — coach choice in Settings).
+- **Right-click context menu items (Mark Win/Loss, Set Goalie, etc.) STAY** — they're for editing clips after the fact.
+
+**Faceoff prompt-flow spec:**
+- Hotkey: `f` (currently `x`)
+- Modal opens → press `W` or `L` → next field
+- Press `H` (help) or `N` (no help) → next field
+- Type jersey number + Enter → centerman recorded
+- Tag committed, modal closes
+
+**Other codes worth prompt-flow (Ben to confirm during Settings build):** Goal-against (set goalie + maybe location quadrant), Penalty (player + duration), Goalie Touch (which goalie). Decision per code via the Settings toggle.
+
+**Storage:** localStorage as user overrides on top of `codes.ts` defaults. Eventually Firestore (per N1).
+
+**Quickie Stats consumes this data** — W/L breakdowns, FO% by zone × strength × centerman, etc. Drill-down on prompted fields.
 
 **N3. Firebase share + clip share + meeting share.** Same plumbing as N1 (Firebase Storage for MP4, Firestore for metadata). Once N1 lands, share is "set permissions doc on this clip/meeting + generate short URL." Without N1, sharing is hacky.
 
