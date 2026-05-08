@@ -301,6 +301,34 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
+**N9. Slide library + bumpers + simple in-app editor.** Per Ben late-2026-05-07. Expansion of the original "PPT slide upload to meetings" item. Three pieces:
+
+**Slide library (storage):**
+- Per-team or per-coach repository of reusable slides (intros, outros, section headers, X-O diagrams, branded covers).
+- Stored in Firestore Storage post-N1. Categories: Headers / Bumpers / X-O Diagrams / Custom / Imported PPTX.
+- Each slide has: name, category, thumbnail, source (PPTX import vs in-app generated), default duration when used in playlist.
+
+**Bumper insertion in Meetings:**
+- Meeting playlists can contain BOTH clips AND slides interleaved.
+- Drag a slide from library into a meeting at any position.
+- Common pattern: title slide → 5 PK clips → bumper "Goalie Scout" → 3 goalie clips → outro slide.
+- Slide entry in `Meeting.clipRefs` becomes a discriminated union: `{ type: "clip", gameId, eventId } | { type: "slide", slideId, durationSec }`.
+- During Meeting Playback, slides render as full-screen images with auto-advance after duration; coach can press space to advance early or use prev/next.
+
+**Simple in-app slide editor (NOT a full PowerPoint clone):**
+- A handful of fixed templates the coach fills in: Title Slide, Section Header, Two-Column (text/image), X-O Diagram (rink + draggable Xs/Os), Quote/Note, Closing/Outro.
+- User picks template → fills text fields + optional image upload → preview → save to library.
+- Render via HTML/canvas to PNG (no actual PPTX manipulation in v1).
+- For PPTX imports: parse with a library like `pptxjs` or `JSZip + ooxml`, render slides to PNG via canvas, store both the original PPTX (for future re-edit) + the rasterized PNG (for fast playlist render).
+
+**Meeting Templates integration (N8 + N1):**
+- Each Meeting Template can auto-stamp a default header/outro slide (e.g., "5v5 Review" template auto-prepends a "Team 5v5 Review · {gameName}" title card).
+- Coach edits/replaces in the Settings page (N2).
+
+**Effort:** ~6-8 hours for a clean v1. Slide library + bumper insertion is the core (~3 hr). Simple editor templates ~2-3 hr. PPTX import parsing ~1-2 hr.
+
+---
+
 **N8b. Top-nav reorg (do alongside N8 folder tree).** Per Ben 2026-05-07: once the folder tree carries opponent + goalie data via sidebar drill-down, the Opponents and Goalies top-nav tabs become redundant duplicates. Plan:
 
 - **Drop "Opponents" tab** — folder tree (Opponent Scout/{opponent}/...) replaces it
