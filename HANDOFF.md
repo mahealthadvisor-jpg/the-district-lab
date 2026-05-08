@@ -285,6 +285,23 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
+**N8b. Top-nav reorg (do alongside N8 folder tree).** Per Ben 2026-05-07: once the folder tree carries opponent + goalie data via sidebar drill-down, the Opponents and Goalies top-nav tabs become redundant duplicates. Plan:
+
+- **Drop "Opponents" tab** — folder tree (Opponent Scout/{opponent}/...) replaces it
+- **Drop "Goalies" tab** — same; per-goalie aggregation rolls into Stats
+- **Add "Stats" tab** — the home for cross-cutting analytics that span the whole tree (no single folder can hold them):
+  - W/L record per opponent
+  - PK% / PP% per opponent + season averages
+  - Goalie heatmap (where each opp goalie gets beat)
+  - Faceoff % by centerman × zone × opponent
+  - +/- per player across all games
+  - Trends over time (is PK trending up across the season?)
+  - Existing Quickie Stats popout rolls in here as one section
+- **Final tab list after restructure:** Home / Scouting Lab / Stats / Meetings / Settings (N2)
+  - Library tab also dropped since folder tree carries it
+
+Effort: ~30 min after N8 lands (mostly removing JSX, plus building Stats shell).
+
 ### Older queue (pushed below new top priorities)
 
 10. **Clip share + viewer route** — `/share/[id]/page.tsx` renders read-only clip with caption/strength/comment overlay. Folds into N3.
