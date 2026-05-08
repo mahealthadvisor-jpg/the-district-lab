@@ -1172,8 +1172,17 @@ export default function DistrictPlatform() {
         e.preventDefault();
         const v = videoRef.current;
         if (v) {
-          if (v.paused) v.play().catch(() => {});
-          else v.pause();
+          if (v.paused) {
+            // Discard in-progress drawing when starting playback. Only saved (committed
+            // via Save button) strokes ever persist; the draw buffer is ephemeral.
+            if (drawActive) {
+              setDrawActive(false);
+              setDrawBuffer([]);
+            }
+            v.play().catch(() => {});
+          } else {
+            v.pause();
+          }
         }
         return;
       }
@@ -1196,7 +1205,7 @@ export default function DistrictPlatform() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handleTag, activeClipId, pendingFaceoffPrompt]);
+  }, [handleTag, activeClipId, pendingFaceoffPrompt, drawActive]);
 
   const playClip = useCallback((eventId: number) => {
     const v = videoRef.current;
