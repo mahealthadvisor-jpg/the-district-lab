@@ -301,6 +301,22 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
+**N10. Personal Library mode (long-term north star, asked late-2026-05-07).** Ben has 10+ years of accumulated coaching video + materials. The Lab can become his personal media database + presentation system, sharing with trusted clients/players via link or login. Most architecture supports this natively (folder tree N8, multi-coach access N1, R2 storage, share links N3, slide library N9). New things needed for true library mode:
+
+1. **Search at scale** — full-text across clip names, comments, folder paths, player tags. Algolia or Firestore composite indexes. Critical when archive grows past hundreds of items.
+2. **Per-folder permissions** — granular beyond per-team. "Client A sees only `Player Development/Client A/`", "Triton players see only `Triton/Meetings/`". Read-only, expiring, watermarked, public-link-no-login options.
+3. **Presentation mode** — polished playback view distinct from the analyst tagging UI. Fullscreen, branded, no chrome. Export-quality for paid client deliverables.
+4. **Storage budget visibility** — Settings panel showing "Using X TB / costs $Y/month" + suggested archive candidates (oldest, least-watched).
+5. **Optional transcoding** — older video files normalized to standard H.264 MP4 for consistent playback.
+
+**Cost at scale (1-2 TB lifetime archive):** ~$20-40/month all-in (R2 + Cloudflare Workers + Firebase free tiers). Compare: Hudl Premium $1500-3000/team/year. Vimeo Pro $300-700/coach/year.
+
+**Strategic angle:** the 10-year accumulated content library IS the moat — uncopyable. Hosting it inside the Lab means Ben controls distribution, branding, attribution, monetization. Tier-able later (free/premium client access).
+
+**Effort:** spread across multiple sessions as the active-coaching features land. Search + presentation mode are the highest-impact additions; granular permissions ride on the multi-coach migration (N1).
+
+---
+
 **N9. Slide library + bumpers + simple in-app editor.** Per Ben late-2026-05-07. Expansion of the original "PPT slide upload to meetings" item. Three pieces:
 
 **Slide library (storage):**
