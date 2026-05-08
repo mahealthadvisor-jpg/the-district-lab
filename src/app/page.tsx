@@ -2,6 +2,13 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import * as eventsStore from "@/lib/events-store";
+import {
+  collectLocalEvents,
+  hasMigrationRun,
+  runMigration,
+  dismissMigration,
+} from "@/lib/migration";
 import {
   Activity,
   HardDrive,
@@ -421,6 +428,37 @@ export default function DistrictPlatform() {
     }
   }, [authLoading, user, router]);
 
+  // ====== Phase 1B migration banner ======
+  const [migrationCount, setMigrationCount] = useState(0);
+  const [migrationRunning, setMigrationRunning] = useState(false);
+  useEffect(() => {
+    if (!user) return;
+    if (hasMigrationRun()) {
+      setMigrationCount(0);
+      return;
+    }
+    const localEvents = collectLocalEvents();
+    setMigrationCount(localEvents.length);
+  }, [user]);
+  async function handleMigrate() {
+    if (!user || migrationRunning) return;
+    setMigrationRunning(true);
+    try {
+      const res = await runMigration(user.uid);
+      alert(`Imported ${res.written} clips to the cloud. Other coaches you invite will now see them.`);
+      setMigrationCount(0);
+    } catch (err) {
+      alert(`Migration failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    } finally {
+      setMigrationRunning(false);
+    }
+  }
+  function handleMigrateDismiss() {
+    if (!confirm("Skip importing your local clips? You can still tag new clips, but the existing ones won't be visible to other coaches.")) return;
+    dismissMigration();
+    setMigrationCount(0);
+  }
+
   const [currentView, setCurrentView] =
     useState<"home" | "library" | "scout" | "meeting" | "opponents" | "goalies">("scout");
   /** When in the Opponents view, the currently focused opponent name. Drives the aggregated clip list. */
@@ -644,13 +682,20 @@ export default function DistrictPlatform() {
 
   useEffect(() => {
     if (!isClient || !selectedGame) return;
-    const saved = localStorage.getItem(`district_tags_${selectedGame.id}`);
-    setEvents(saved ? JSON.parse(saved) : []);
+    // Optimistic load from localStorage cache for instant UI render.
+    const cached = localStorage.getItem(`district_tags_${selectedGame.id}`);
+    setEvents(cached ? JSON.parse(cached) : []);
     setActiveManualTags({});
     setPendingLocateId(null);
     setActiveClipId(null);
     setDrawActive(false);
     setDrawBuffer([]);
+
+    // Subscribe to Firestore for authoritative real-time data (Phase 1B).
+    // Other coaches' tags appear here automatically.
+    const unsubEvents = eventsStore.subscribeToPeriodEvents(selectedGame.id, (fromCloud) => {
+      setEvents(fromCloud);
+    });
 
     // Try to load the video file from IndexedDB. If there isn't one, fall back
     // to /games/{filename} (which may 404 — that's OK, the empty state shows).
@@ -670,6 +715,7 @@ export default function DistrictPlatform() {
         setVideoUrl(selectedGame.file ? `/games/${selectedGame.file}` : null)
       );
     return () => {
+      unsubEvents();
       if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [selectedGame, isClient]);
@@ -1039,6 +1085,7 @@ export default function DistrictPlatform() {
             strength: currentStrength,
           };
           setEvents((prev) => [evt, ...prev]);
+          if (user) eventsStore.saveEvent(evt, user.uid).catch((err) => console.error("Cloud save failed:", err));
           setActiveManualTags((prev) => {
             const next = { ...prev };
             delete next[action.id];
@@ -1078,13 +1125,14 @@ export default function DistrictPlatform() {
           strength: currentStrength,
         };
         setEvents((prev) => [evt, ...prev]);
+        if (user) eventsStore.saveEvent(evt, user.uid).catch((err) => console.error("Cloud save failed:", err));
         channelRef.current?.postMessage({
           type: "TAG_ADDED",
           event: evt,
         } satisfies SyncMessage);
       }
     },
-    [activeManualTags, currentView, selectedGame.id, currentStrength]
+    [activeManualTags, currentView, selectedGame.id, currentStrength, user]
   );
 
   useEffect(() => {
@@ -1168,6 +1216,7 @@ export default function DistrictPlatform() {
         playerIds: player ? [player.id] : undefined,
       };
       setEvents((prev) => [evt, ...prev]);
+      if (user) eventsStore.saveEvent(evt, user.uid).catch((err) => console.error("Cloud save failed:", err));
       channelRef.current?.postMessage({
         type: "TAG_ADDED",
         event: evt,
@@ -1176,7 +1225,7 @@ export default function DistrictPlatform() {
       videoRef.current?.play().catch(() => {});
       return null;
     });
-  }, [teams, selectedGame.id]);
+  }, [teams, selectedGame.id, user]);
   /** Modal keyboard handlers — fires while pendingFaceoffPrompt is non-null. */
   useEffect(() => {
     if (!pendingFaceoffPrompt) return;
@@ -1815,9 +1864,18 @@ export default function DistrictPlatform() {
   }
 
   function toggleFlag(eventId: number) {
-    setEvents((prev) =>
-      prev.map((e) => (e.id === eventId ? { ...e, flagged: !e.flagged } : e))
-    );
+    setEvents((prev) => {
+      const next = prev.map((e) =>
+        e.id === eventId ? { ...e, flagged: !e.flagged } : e
+      );
+      const updated = next.find((e) => e.id === eventId);
+      if (updated) {
+        eventsStore
+          .updateEvent(eventId, { flagged: updated.flagged })
+          .catch((err) => console.error("Cloud flag update failed:", err));
+      }
+      return next;
+    });
   }
 
   function trimIn(eventId: number) {
@@ -2262,6 +2320,7 @@ export default function DistrictPlatform() {
 
   function deleteEvent(id: number) {
     setEvents((prev) => prev.filter((x) => x.id !== id));
+    eventsStore.deleteEvent(id).catch((err) => console.error("Cloud delete failed:", err));
     channelRef.current?.postMessage({
       type: "EVENT_DELETED",
       eventId: id,
@@ -2269,6 +2328,7 @@ export default function DistrictPlatform() {
   }
   function updateComment(id: number, comment: string) {
     setEvents((prev) => prev.map((x) => (x.id === id ? { ...x, comment } : x)));
+    eventsStore.updateEvent(id, { comment }).catch((err) => console.error("Cloud comment update failed:", err));
     channelRef.current?.postMessage({
       type: "EVENT_COMMENT",
       eventId: id,
@@ -2559,6 +2619,39 @@ export default function DistrictPlatform() {
           )}
         </div>
       </header>
+
+      {/* ====== Phase 1B migration banner ====== */}
+      {migrationCount > 0 && (
+        <div className="bg-amber-950/40 border-b border-amber-700/50 px-6 py-3 flex items-center justify-between gap-3 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="text-amber-300 text-xl shrink-0">⚡</div>
+            <div className="min-w-0">
+              <div className="text-sm font-black uppercase tracking-wide text-amber-200">
+                {migrationCount} local clip{migrationCount === 1 ? "" : "s"} ready to import
+              </div>
+              <div className="text-[11px] text-amber-300/70 mt-0.5">
+                Import them to the cloud so assistant coaches can see them, get cross-device sync, and unlock real-time multi-coach tagging.
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleMigrateDismiss}
+              disabled={migrationRunning}
+              className="px-3 py-1.5 rounded text-[11px] font-black uppercase tracking-widest text-amber-300 hover:text-white hover:bg-amber-900/40 disabled:opacity-50"
+            >
+              Skip
+            </button>
+            <button
+              onClick={handleMigrate}
+              disabled={migrationRunning}
+              className="flex items-center gap-2 px-4 py-1.5 rounded bg-amber-500 hover:bg-amber-400 disabled:bg-slate-700 disabled:text-slate-500 text-slate-950 text-[11px] font-black uppercase tracking-widest disabled:cursor-not-allowed"
+            >
+              {migrationRunning ? "Importing…" : `Import ${migrationCount}`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {currentView === "scout" ? (
         <div className="flex-1 flex overflow-hidden">
