@@ -992,10 +992,14 @@ export default function DistrictPlatform() {
         if (v) v.currentTime = msg.time;
       } else if (msg.type === "EVENT_DELETED") {
         setEvents((prev) => prev.filter((x) => x.id !== msg.eventId));
+        eventsStore.deleteEvent(msg.eventId).catch((err) => console.error("Cloud delete (popout) failed:", err));
       } else if (msg.type === "EVENT_COMMENT") {
         setEvents((prev) =>
           prev.map((x) => (x.id === msg.eventId ? { ...x, comment: msg.comment } : x))
         );
+        eventsStore
+          .updateEvent(msg.eventId, { comment: msg.comment })
+          .catch((err) => console.error("Cloud comment (popout) failed:", err));
       }
     };
     return () => {
@@ -1734,16 +1738,23 @@ export default function DistrictPlatform() {
   }
   /** Toggle a single player on the currently-selected event's playerIds. */
   function togglePlayerOnEvent(eventId: number, playerId: string) {
-    setEvents((prev) =>
-      prev.map((e) => {
+    setEvents((prev) => {
+      const next = prev.map((e) => {
         if (e.id !== eventId) return e;
         const current = e.playerIds ?? [];
-        const next = current.includes(playerId)
+        const newPlayers = current.includes(playerId)
           ? current.filter((id) => id !== playerId)
           : [...current, playerId];
-        return { ...e, playerIds: next.length ? next : undefined };
-      })
-    );
+        return { ...e, playerIds: newPlayers.length ? newPlayers : undefined };
+      });
+      const updated = next.find((e) => e.id === eventId);
+      if (updated) {
+        eventsStore
+          .updateEvent(eventId, { playerIds: updated.playerIds ?? [] })
+          .catch((err) => console.error("Cloud player tag update failed:", err));
+      }
+      return next;
+    });
   }
 
   function renameTeam(teamId: string) {
@@ -1882,25 +1893,39 @@ export default function DistrictPlatform() {
     const v = videoRef.current;
     if (!v) return;
     const t = v.currentTime;
-    setEvents((prev) =>
-      prev.map((e) => {
+    setEvents((prev) => {
+      const next = prev.map((e) => {
         if (e.id !== eventId) return e;
-        if (t >= e.end) return e; // can't trim in past out
+        if (t >= e.end) return e;
         return { ...e, start: t, trimmed: true };
-      })
-    );
+      });
+      const updated = next.find((e) => e.id === eventId);
+      if (updated && updated.start === t) {
+        eventsStore
+          .updateEvent(eventId, { start: t, trimmed: true })
+          .catch((err) => console.error("Cloud trim-in failed:", err));
+      }
+      return next;
+    });
   }
   function trimOut(eventId: number) {
     const v = videoRef.current;
     if (!v) return;
     const t = v.currentTime;
-    setEvents((prev) =>
-      prev.map((e) => {
+    setEvents((prev) => {
+      const next = prev.map((e) => {
         if (e.id !== eventId) return e;
-        if (t <= e.start) return e; // can't trim out before in
+        if (t <= e.start) return e;
         return { ...e, end: t, trimmed: true };
-      })
-    );
+      });
+      const updated = next.find((e) => e.id === eventId);
+      if (updated && updated.end === t) {
+        eventsStore
+          .updateEvent(eventId, { end: t, trimmed: true })
+          .catch((err) => console.error("Cloud trim-out failed:", err));
+      }
+      return next;
+    });
   }
   function removeTrim(eventId: number) {
     setEvents((prev) =>
@@ -2343,6 +2368,7 @@ export default function DistrictPlatform() {
           : e
       )
     );
+    eventsStore.updateEvent(id, { x, y }).catch((err) => console.error("Cloud location update failed:", err));
     setPendingLocateId(null);
   }
 
@@ -3668,6 +3694,12 @@ export default function DistrictPlatform() {
                           ids.has(evt.id) ? { ...evt, strength: next } : evt
                         )
                       );
+                      // Cloud sync each affected event
+                      ids.forEach((id) => {
+                        eventsStore
+                          .updateEvent(id, { strength: next })
+                          .catch((err) => console.error("Cloud bulk-strength failed:", err));
+                      });
                       ev.target.value = "";
                     }}
                     title="Set strength on all selected clips"
@@ -4548,13 +4580,13 @@ export default function DistrictPlatform() {
                     <button
                       onClick={() => {
                         closeContextMenu();
+                        const newResult = ev.faceoffResult === "W" ? undefined : "W";
                         setEvents((prev) =>
-                          prev.map((e) =>
-                            e.id === ev.id
-                              ? { ...e, faceoffResult: e.faceoffResult === "W" ? undefined : "W" }
-                              : e
-                          )
+                          prev.map((e) => (e.id === ev.id ? { ...e, faceoffResult: newResult } : e))
                         );
+                        eventsStore
+                          .updateEvent(ev.id, { faceoffResult: newResult })
+                          .catch((err) => console.error("Cloud faceoffResult update failed:", err));
                       }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
                     >
@@ -4564,13 +4596,13 @@ export default function DistrictPlatform() {
                     <button
                       onClick={() => {
                         closeContextMenu();
+                        const newResult = ev.faceoffResult === "L" ? undefined : "L";
                         setEvents((prev) =>
-                          prev.map((e) =>
-                            e.id === ev.id
-                              ? { ...e, faceoffResult: e.faceoffResult === "L" ? undefined : "L" }
-                              : e
-                          )
+                          prev.map((e) => (e.id === ev.id ? { ...e, faceoffResult: newResult } : e))
                         );
+                        eventsStore
+                          .updateEvent(ev.id, { faceoffResult: newResult })
+                          .catch((err) => console.error("Cloud faceoffResult update failed:", err));
                       }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
                     >
@@ -4588,13 +4620,15 @@ export default function DistrictPlatform() {
                         ev.scoutedGoalie ?? ""
                       );
                       if (next === null) return;
+                      const newGoalie = next.trim() || undefined;
                       setEvents((prev) =>
                         prev.map((e) =>
-                          e.id === ev.id
-                            ? { ...e, scoutedGoalie: next.trim() || undefined }
-                            : e
+                          e.id === ev.id ? { ...e, scoutedGoalie: newGoalie } : e
                         )
                       );
+                      eventsStore
+                        .updateEvent(ev.id, { scoutedGoalie: newGoalie })
+                        .catch((err) => console.error("Cloud scoutedGoalie update failed:", err));
                     }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 text-slate-100 text-left"
                   >
