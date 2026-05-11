@@ -409,6 +409,24 @@ export default function DistrictPlatform() {
     if (typeof window === "undefined") return;
     type WindowWithCleanup = Window & {
       __cleanupTeams?: () => Promise<{ teamId: string; before: { memberIds: string[]; ownerId: string }; after: string }[]>;
+      __addMember?: (teamId: string, uid: string, role: string) => Promise<string>;
+    };
+    (window as WindowWithCleanup).__addMember = async (teamId: string, uid: string, role: string) => {
+      const ref = fsDoc(firestoreDb, "teams", teamId);
+      // Read current state for the response message
+      const snap = await fsGetDocs(fsCollection(firestoreDb, "teams"));
+      const existing = snap.docs.find((d) => d.id === teamId)?.data() as { memberIds?: string[]; memberRoles?: Record<string, string> } | undefined;
+      const currentIds = existing?.memberIds ?? [];
+      const currentRoles = existing?.memberRoles ?? {};
+      const newIds = currentIds.includes(uid) ? currentIds : [...currentIds, uid];
+      const newRoles = { ...currentRoles, [uid]: role };
+      await fsUpdateDoc(ref, {
+        memberIds: newIds,
+        memberRoles: newRoles,
+      });
+      const msg = `Added ${uid} as ${role} to team ${teamId}. memberIds=${JSON.stringify(newIds)}`;
+      console.log(msg);
+      return msg;
     };
     (window as WindowWithCleanup).__cleanupTeams = async () => {
       const myUid = user.uid;
