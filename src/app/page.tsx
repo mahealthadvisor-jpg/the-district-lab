@@ -2676,10 +2676,18 @@ export default function DistrictPlatform() {
             <HardDrive size={14} className="text-amber-500" /> {storageLabel}
           </div>
           {profile && (
-            <div className="flex items-center gap-2 bg-slate-900 pl-3 pr-1 py-1 rounded-full border border-slate-800 text-[11px] font-mono font-bold">
-              <span className="text-slate-300 truncate max-w-[140px]" title={profile.email}>
-                {profile.displayName}
-              </span>
+            <div
+              className="flex items-center gap-2.5 bg-slate-900 pl-3 pr-1 py-1 rounded-full border border-slate-800 text-[11px] font-mono font-bold"
+              title={`${profile.displayName} · ${profile.email}`}
+            >
+              <div className="flex flex-col leading-tight">
+                <span className="text-slate-100 whitespace-nowrap">
+                  {profile.displayName}
+                </span>
+                <span className="text-[9px] text-slate-500 font-normal whitespace-nowrap truncate max-w-[200px]">
+                  {profile.email}
+                </span>
+              </div>
               <button
                 onClick={async () => {
                   await signOut();
