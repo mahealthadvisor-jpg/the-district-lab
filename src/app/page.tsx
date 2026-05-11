@@ -454,34 +454,16 @@ export default function DistrictPlatform() {
     currentTime: number;
   }>({ events: [], activeManualTags: {}, selectedGameId: "", currentTime: 0 });
 
-  const [teams, setTeams] = useState<Team[]>(DEFAULT_TEAMS);
-  const [selectedGame, setSelectedGame] = useState<Period>(
-    // Pick the first available period anywhere in the tree.
-    (() => {
-      function find(folders: Folder[]): Period | null {
-        for (const f of folders) {
-          for (const g of f.games) if (g.periods[0]) return g.periods[0];
-          const sub = find(f.subFolders);
-          if (sub) return sub;
-        }
-        return null;
-      }
-      const t = DEFAULT_TEAMS[0];
-      return (
-        find(t.folders) ?? {
-          id: "default-period",
-          label: "Full Game",
-        }
-      );
-    })()
-  );
-  // Tree expand/collapse state for the Active Vault
-  const [expandedTeams, setExpandedTeams] = useState<Set<string>>(
-    new Set(DEFAULT_TEAMS.map((t) => t.id))
-  );
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-    new Set(DEFAULT_TEAMS.flatMap((t) => t.folders.map((f) => f.id)))
-  );
+  // Start with NO teams seeded — fresh signups see an empty sidebar until they're
+  // invited to a team or import legacy localStorage data via the migration banner.
+  // (Phase 1C — was DEFAULT_TEAMS, but that leaked seed Triton into every new coach's UI.)
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [selectedGame, setSelectedGame] = useState<Period>({
+    id: "default-period",
+    label: "Full Game",
+  });
+  const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [expandedGames, setExpandedGames] = useState<Set<string>>(new Set());
   const [events, setEvents] = useState<TaggedEvent[]>([]);
   const [activeManualTags, setActiveManualTags] = useState<Record<string, number>>({});
@@ -590,6 +572,22 @@ export default function DistrictPlatform() {
         setExpandedFolders(
           new Set(migrated.flatMap((t) => t.folders.map((f) => f.id)))
         );
+        // Auto-select the first available period so the video stage isn't empty
+        function findFirstPeriod(folders: Folder[]): Period | null {
+          for (const f of folders) {
+            for (const g of f.games) if (g.periods[0]) return g.periods[0];
+            const sub = findFirstPeriod(f.subFolders);
+            if (sub) return sub;
+          }
+          return null;
+        }
+        for (const t of migrated) {
+          const p = findFirstPeriod(t.folders);
+          if (p) {
+            setSelectedGame(p);
+            break;
+          }
+        }
       } catch {
         // ignore parse errors
       }
@@ -631,6 +629,23 @@ export default function DistrictPlatform() {
         const next = new Set(prev);
         for (const t of cloudTeams) next.add(t.id);
         return next;
+      });
+      // If selectedGame is still the placeholder, auto-select the first available period.
+      setSelectedGame((current) => {
+        if (current.id !== "default-period") return current;
+        function findFirst(folders: Folder[]): Period | null {
+          for (const f of folders) {
+            for (const g of f.games) if (g.periods[0]) return g.periods[0];
+            const sub = findFirst(f.subFolders);
+            if (sub) return sub;
+          }
+          return null;
+        }
+        for (const t of cloudTeams) {
+          const p = findFirst(t.folders);
+          if (p) return p;
+        }
+        return current;
       });
     });
     return () => unsub();
