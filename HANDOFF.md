@@ -301,6 +301,23 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
+**N11. Twitter / X import + export pipelines (asked 2026-05-11).** Coaching workflow needs both directions:
+
+**Inbound — download clips/GIFs from Twitter:**
+- Use cases: NHL/NCAA highlight tweets, scouting analyst breakdowns, opponent clips someone posted, teaching examples.
+- Path: tiny server endpoint running `yt-dlp` (Python). User pastes a tweet URL in the Lab, server fetches the video, returns the file. Lab ingests as a new period under the current team.
+- Hosting: Cloudflare Workers can't run Python directly — need a small VPS / Railway / Render service. OR use a third-party API like savetweetvid (rate-limited, fragile).
+- Effort: ~4-6 hr.
+
+**Outbound — export clips for Twitter/X:**
+- Twitter constraints: MP4 H.264 + AAC, max 2:20 (140s) free / 10 min Blue, 512 MB max.
+- Current Lab clip download is `.webm` via MediaRecorder. Twitter Web actually accepts `.webm` upload, but MP4 is broader compat.
+- Proper MP4 export: FFmpeg.wasm (~25 MB WASM bundle, in-browser transcoding). Heavy load but works offline.
+- Bonus feature: **highlight reel generator** — concatenate selected clips + auto intro/outro slides + Ben's watermark → Twitter-ready single MP4. This is the actual coaching workflow (post a goal compilation, a player highlight reel, etc.).
+- Effort: ~5-7 hr for clean reel export.
+
+---
+
 **N10. Personal Library mode (long-term north star, asked late-2026-05-07).** Ben has 10+ years of accumulated coaching video + materials. The Lab can become his personal media database + presentation system, sharing with trusted clients/players via link or login. Most architecture supports this natively (folder tree N8, multi-coach access N1, R2 storage, share links N3, slide library N9). New things needed for true library mode:
 
 1. **Search at scale** — full-text across clip names, comments, folder paths, player tags. Algolia or Firestore composite indexes. Critical when archive grows past hundreds of items.
