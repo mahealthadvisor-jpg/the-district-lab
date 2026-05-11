@@ -410,6 +410,24 @@ export default function DistrictPlatform() {
     type WindowWithCleanup = Window & {
       __cleanupTeams?: () => Promise<{ teamId: string; before: { memberIds: string[]; ownerId: string }; after: string }[]>;
       __addMember?: (teamId: string, uid: string, role: string) => Promise<string>;
+      __debugTeams?: () => Promise<void>;
+    };
+    (window as WindowWithCleanup).__debugTeams = async () => {
+      const myUid = user.uid;
+      console.log("Signed in as uid:", myUid);
+      const snap = await fsGetDocs(fsCollection(firestoreDb, "teams"));
+      console.log(`Total teams in Firestore: ${snap.size}`);
+      const rows: { teamId: string; memberIds: string[]; ownerId: string; containsMyUid: boolean }[] = [];
+      snap.forEach((d) => {
+        const data = d.data() as { memberIds?: string[]; ownerId?: string };
+        rows.push({
+          teamId: d.id,
+          memberIds: data.memberIds ?? [],
+          ownerId: data.ownerId ?? "(unset)",
+          containsMyUid: (data.memberIds ?? []).includes(myUid),
+        });
+      });
+      console.table(rows);
     };
     (window as WindowWithCleanup).__addMember = async (teamId: string, uid: string, role: string) => {
       const ref = fsDoc(firestoreDb, "teams", teamId);
