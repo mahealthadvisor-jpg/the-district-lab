@@ -4,6 +4,13 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import * as eventsStore from "@/lib/events-store";
 import * as teamsStore from "@/lib/teams-store";
+import { db as firestoreDb } from "@/lib/firebase";
+import {
+  collection as fsCollection,
+  doc as fsDoc,
+  getDocs as fsGetDocs,
+  updateDoc as fsUpdateDoc,
+} from "firebase/firestore";
 import {
   collectLocalEvents,
   hasMigrationRun,
@@ -391,6 +398,40 @@ export default function DistrictPlatform() {
       router.replace("/login");
     }
   }, [authLoading, user, router]);
+
+  // ====== TEMP: one-shot cleanup function exposed on window for the
+  // multi-coach testing pollution incident (2026-05-11). Sign in as HC,
+  // open DevTools Console, paste: await __cleanupTeams()
+  // Removes all team members except your uid, resets ownerId, etc.
+  // Safe to remove after the cleanup is done.
+  useEffect(() => {
+    if (!user) return;
+    if (typeof window === "undefined") return;
+    type WindowWithCleanup = Window & {
+      __cleanupTeams?: () => Promise<{ teamId: string; before: { memberIds: string[]; ownerId: string }; after: string }[]>;
+    };
+    (window as WindowWithCleanup).__cleanupTeams = async () => {
+      const myUid = user.uid;
+      const snap = await fsGetDocs(fsCollection(firestoreDb, "teams"));
+      const results: { teamId: string; before: { memberIds: string[]; ownerId: string }; after: string }[] = [];
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data() as { memberIds?: string[]; memberRoles?: Record<string, string>; ownerId?: string };
+        const before = { memberIds: data.memberIds ?? [], ownerId: data.ownerId ?? "(unset)" };
+        await fsUpdateDoc(fsDoc(firestoreDb, "teams", docSnap.id), {
+          memberIds: [myUid],
+          memberRoles: { [myUid]: "HC" },
+          ownerId: myUid,
+        });
+        results.push({
+          teamId: docSnap.id,
+          before,
+          after: `memberIds=[${myUid}], ownerId=${myUid}`,
+        });
+      }
+      console.table(results);
+      return results;
+    };
+  }, [user]);
 
   // ====== Phase 1B migration banner ======
   const [migrationCount, setMigrationCount] = useState(0);
