@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import * as eventsStore from "@/lib/events-store";
 import * as teamsStore from "@/lib/teams-store";
+import * as videoCloud from "@/lib/video-cloud";
 import { db as firestoreDb } from "@/lib/firebase";
 import {
   collection as fsCollection,
@@ -553,6 +554,8 @@ export default function DistrictPlatform() {
   // Video source for the currently selected game (Blob URL from IndexedDB,
   // or fallback to `/games/{file}` if a static file exists, or null if no video yet).
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  /** Cloud upload progress for the current video, 0-100. null = not uploading. */
+  const [videoUploadPct, setVideoUploadPct] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const rinkFileInputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -809,23 +812,35 @@ export default function DistrictPlatform() {
       setEvents(fromCloud);
     });
 
-    // Try to load the video file from IndexedDB. If there isn't one, fall back
-    // to /games/{filename} (which may 404 — that's OK, the empty state shows).
+    // Video resolution priority (Phase 1C+):
+    //   1. Local IndexedDB (instant, for the coach who uploaded)
+    //   2. Cloud (Firebase Storage) — for other coaches on this team
+    //   3. /games/{filename} static fallback (legacy)
     let revoke: string | null = null;
     setVideoUrl(null);
-    loadVideo(selectedGame.id)
-      .then((file) => {
+    (async () => {
+      try {
+        const file = await loadVideo(selectedGame.id);
         if (file) {
           const url = URL.createObjectURL(file);
           revoke = url;
           setVideoUrl(url);
-        } else {
-          setVideoUrl(selectedGame.file ? `/games/${selectedGame.file}` : null);
+          return;
         }
-      })
-      .catch(() =>
-        setVideoUrl(selectedGame.file ? `/games/${selectedGame.file}` : null)
-      );
+      } catch {
+        // fall through to cloud
+      }
+      try {
+        const cloudUrl = await videoCloud.getCloudVideoUrl(selectedGame.id);
+        if (cloudUrl) {
+          setVideoUrl(cloudUrl);
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch cloud video URL:", err);
+      }
+      setVideoUrl(selectedGame.file ? `/games/${selectedGame.file}` : null);
+    })();
     return () => {
       unsubEvents();
       if (revoke) URL.revokeObjectURL(revoke);
@@ -838,9 +853,43 @@ export default function DistrictPlatform() {
       return;
     }
     try {
+      // 1. Save to local IndexedDB for instant playback on this browser
       await saveVideo(selectedGame.id, file);
       const url = URL.createObjectURL(file);
       setVideoUrl(url);
+
+      // 2. Kick off cloud upload so other coaches can play it (Phase 1C+)
+      if (user) {
+        const path = findPeriodPath(teams, selectedGame.id);
+        const teamId = path?.team.id;
+        if (teamId) {
+          setVideoUploadPct(0);
+          const { task, donePromise } = videoCloud.uploadVideoToCloud(
+            file,
+            selectedGame.id,
+            teamId,
+            user.uid
+          );
+          task.on("state_changed", (snap) => {
+            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            setVideoUploadPct(pct);
+          });
+          donePromise
+            .then(() => {
+              setVideoUploadPct(null);
+              console.log("Video uploaded to cloud for period", selectedGame.id);
+            })
+            .catch((err) => {
+              setVideoUploadPct(null);
+              console.error("Cloud upload failed:", err);
+              alert(
+                `Local copy saved, but cloud upload failed: ${
+                  err instanceof Error ? err.message : "unknown error"
+                }. Other coaches won't see this video until you re-upload.`
+              );
+            });
+        }
+      }
     } catch (e) {
       console.error(e);
       alert("Failed to save video to local storage. The file may be too large for the browser quota.");
@@ -3063,6 +3112,20 @@ export default function DistrictPlatform() {
                       e.target.value = "";
                     }}
                   />
+                  {videoUploadPct !== null && (
+                    <div className="absolute top-0 left-0 right-0 z-20 bg-slate-950/90 backdrop-blur-sm border-b border-emerald-500/40 px-4 py-2.5">
+                      <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-emerald-300 mb-1.5">
+                        <span>Uploading to cloud for other coaches</span>
+                        <span>{videoUploadPct}%</span>
+                      </div>
+                      <div className="h-1 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 transition-all duration-200"
+                          style={{ width: `${videoUploadPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                   {videoUrl ? (
                     <video
                       key={videoUrl === "__LIVE__" ? "__LIVE__" : videoUrl}
