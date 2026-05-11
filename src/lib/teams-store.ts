@@ -21,6 +21,7 @@ import {
   where,
   onSnapshot,
   setDoc,
+  getDoc,
   deleteDoc,
   serverTimestamp,
   arrayUnion,
@@ -73,26 +74,38 @@ export function subscribeToMyTeams(
   });
 }
 
-/** Upsert a team. If new, sets owner = uid + sole member. */
+/**
+ * Upsert a team. CRITICAL: on UPDATE (doc already exists), do NOT touch ownerId,
+ * memberIds, or memberRoles — those are membership concerns owned by the
+ * addMemberToTeam / removeMemberFromTeam helpers. On CREATE only, stamp the
+ * caller as owner + sole member with role HC.
+ *
+ * Bug history (2026-05-11): earlier version stamped ownerId + arrayUnion(ownerId)
+ * + memberRoles[ownerId]="HC" on every save. That meant any coach with a stale
+ * localStorage cache who signed in would overwrite the team's owner with
+ * themselves and add themselves as HC. Polluted Triton with multiple HC entries.
+ */
 export async function saveTeam(team: Team, ownerId: string): Promise<void> {
   const ref = doc(db, TEAMS_COLLECTION, team.id);
-  await setDoc(
-    ref,
-    {
+  const snap = await getDoc(ref);
+  if (!snap.exists()) {
+    // Create — stamp ownership + initial HC membership.
+    await setDoc(ref, {
       ...team,
       ownerId,
-      memberIds: arrayUnion(ownerId),
-      [`memberRoles.${ownerId}`]: "HC",
+      memberIds: [ownerId],
+      memberRoles: { [ownerId]: "HC" },
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
-  // Set createdAt only on first write
-  await setDoc(
-    ref,
-    { createdAt: serverTimestamp() },
-    { merge: true, mergeFields: ["createdAt"] }
-  ).catch(() => {});
+    });
+  } else {
+    // Update — preserve ownership + membership exactly as stored.
+    // Only the team-data fields (name, folders, roster) are written.
+    await updateDoc(ref, {
+      ...team,
+      updatedAt: serverTimestamp(),
+    });
+  }
 }
 
 /** Delete a team (only the owner should call this; rules enforce). */
