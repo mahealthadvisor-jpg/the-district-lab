@@ -561,35 +561,40 @@ export default function DistrictPlatform() {
   // ====== Init ======
   useEffect(() => {
     setIsClient(true);
-    const savedTeams = localStorage.getItem("district_teams");
-    if (savedTeams) {
-      try {
-        const parsed = JSON.parse(savedTeams) as LegacyTeam[];
-        const migrated = migrateTeams(parsed);
-        setTeams(migrated);
-        // Auto-expand teams + folders so the user sees their content
-        setExpandedTeams(new Set(migrated.map((t) => t.id)));
-        setExpandedFolders(
-          new Set(migrated.flatMap((t) => t.folders.map((f) => f.id)))
-        );
-        // Auto-select the first available period so the video stage isn't empty
-        function findFirstPeriod(folders: Folder[]): Period | null {
-          for (const f of folders) {
-            for (const g of f.games) if (g.periods[0]) return g.periods[0];
-            const sub = findFirstPeriod(f.subFolders);
-            if (sub) return sub;
+    // Only seed teams from localStorage for legacy users who already migrated.
+    // Fresh signups (Coach2 in incognito, never run migration) should start empty —
+    // their teams populate from Firestore once they're added as a member.
+    if (hasTeamsMigrationRun()) {
+      const savedTeams = localStorage.getItem("district_teams");
+      if (savedTeams) {
+        try {
+          const parsed = JSON.parse(savedTeams) as LegacyTeam[];
+          const migrated = migrateTeams(parsed);
+          setTeams(migrated);
+          // Auto-expand teams + folders so the user sees their content
+          setExpandedTeams(new Set(migrated.map((t) => t.id)));
+          setExpandedFolders(
+            new Set(migrated.flatMap((t) => t.folders.map((f) => f.id)))
+          );
+          // Auto-select the first available period so the video stage isn't empty
+          function findFirstPeriod(folders: Folder[]): Period | null {
+            for (const f of folders) {
+              for (const g of f.games) if (g.periods[0]) return g.periods[0];
+              const sub = findFirstPeriod(f.subFolders);
+              if (sub) return sub;
+            }
+            return null;
           }
-          return null;
-        }
-        for (const t of migrated) {
-          const p = findFirstPeriod(t.folders);
-          if (p) {
-            setSelectedGame(p);
-            break;
+          for (const t of migrated) {
+            const p = findFirstPeriod(t.folders);
+            if (p) {
+              setSelectedGame(p);
+              break;
+            }
           }
+        } catch {
+          // ignore parse errors
         }
-      } catch {
-        // ignore parse errors
       }
     }
     refreshStorage();
