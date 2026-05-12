@@ -860,21 +860,24 @@ export default function DistrictPlatform() {
     //   4. /games/{filename} static fallback (legacy)
     let revoke: string | null = null;
     setVideoUrl(null);
+    console.log("[playback] period switched, selectedGame.id =", selectedGame.id, "label =", selectedGame.label);
     (async () => {
       // Check Firestore /videos doc for Cloudflare HLS URL first
       try {
         const { getDoc, doc: fsDocFn } = await import("firebase/firestore");
         const { db: fsDb } = await import("@/lib/firebase");
         const snap = await getDoc(fsDocFn(fsDb, "videos", selectedGame.id));
+        console.log("[playback] /videos/" + selectedGame.id + ":", snap.exists() ? snap.data() : "DOC NOT FOUND");
         if (snap.exists()) {
           const data = snap.data() as { hlsUrl?: string; isLive?: boolean };
           if (data.hlsUrl) {
+            console.log("[playback] using HLS URL:", data.hlsUrl);
             setVideoUrl(data.hlsUrl); // hls.js attached via useEffect below
             return;
           }
         }
       } catch (err) {
-        console.error("Failed to check Firestore /videos for HLS URL:", err);
+        console.error("[playback] Failed to check Firestore /videos for HLS URL:", err);
       }
       // Fall back to local IndexedDB
       try {
