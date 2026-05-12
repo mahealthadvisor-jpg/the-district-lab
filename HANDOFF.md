@@ -1,7 +1,40 @@
 # The District Video Lab — Session Handoff
 
-**Last updated:** 2026-05-07
+**Last updated:** 2026-05-12 (overnight session, ~24hr push)
 **For:** the next Claude Code session continuing this work.
+
+## CURRENT STATE (start here in next session)
+
+**Massive overnight push shipped:**
+- Multi-coach Firebase Auth + Firestore foundation (Phase 1A/1B/1C)
+- Teams + events + rink dots + comments sync cross-coach in real time (verified Coach 4 test)
+- Firebase Storage video upload + cross-coach playback
+- **Cloudflare Stream Live (Path C)** via WHIP + hls.js — WHIP push verified working, HLS playback verification pending
+- Faceoff prompt-flow modal (N2 v1 hardcoded for faceoff code)
+- Cloud video upload progress UI
+- Lots of N spec items captured (N1-N16 logged in this doc)
+
+**KNOWN BROKEN STATE TO FIX FIRST:**
+1. Tightened Firestore rules were deployed but the event teamId backfill didn't complete properly. Coach 4 gets `permission-denied: Missing or insufficient permissions` from the events snapshot listener because some events still lack `teamId`.
+2. **Immediate fix for next session:** revert Firestore rules to Phase 1A baseline (open to authenticated), run `__backfillEventTeamIds()` in HC main browser console, verify orphaned count is 0, re-deploy tight rules.
+3. Then verify Coach 4 can see the live HLS stream end-to-end. Cloudflare Stream test data confirmed: `/videos/game-1778567578811-full` has correct hlsUrl + isLive=true + teamId=triton.
+
+**Console helpers Ben can paste in HC main browser (still active in code):**
+- `await __cleanupTeams()` — reset all teams to HC uid only
+- `await __addMember(teamId, uid, role)` — add a coach to a team
+- `await __debugTeams()` — list teams with containsMyUid
+- `await __backfillEventTeamIds()` — backfill teamId on legacy events
+
+**Cloudflare credentials in `.env.local` (gitignored):**
+- CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_STREAM_API_TOKEN configured
+- Customer subdomain: `customer-x9nxs4b9btmvme0o.cloudflarestream.com` (derived from API responses)
+
+**Coach 4 test account exists in Firebase Auth:**
+- Email: `coach4@test.com`
+- UID: `JclYPIi21mTlWWHm0PweTR40p9P2`
+- Member of `triton` team as AC1
+
+---
 
 ---
 
