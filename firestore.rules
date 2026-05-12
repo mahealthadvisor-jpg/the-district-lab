@@ -2,19 +2,68 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Coach profiles (/users/{uid}). A coach can only read/write their own.
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // ====== Helpers ======
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Phase 1A baseline (N1 v1): any authenticated user can read/write
-    // everything else. This will be tightened to per-team membership in
-    // Phase 1B/1C when we move teams + tagged events + meetings to Firestore.
-    //
-    // SAFE because right now only the project owner has accounts. Lock down
-    // BEFORE inviting assistant coaches.
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    function isTeamMember(teamId) {
+      return isSignedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/teams/$(teamId)).data.memberIds;
     }
+
+    // ====== /users/{uid} — coach profiles ======
+    // A coach can only read/write their OWN profile doc. Other coaches cannot
+    // enumerate or read the user list. (To look up another coach's uid for
+    // invites, we'll add a server-side endpoint later.)
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ====== /teams/{teamId} ======
+    // Read / update: only members of the team
+    // Create: any authenticated user (creator becomes owner + sole member via saveTeam)
+    // Delete: only the owner
+    match /teams/{teamId} {
+      allow read: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && request.auth.uid in resource.data.memberIds;
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.ownerId;
+    }
+
+    // ====== /events/{eventId} — tagged clips ======
+    // CRUD: only if the requesting user is a member of the event's team.
+    // For CREATE, the incoming data's teamId is checked.
+    // For READ/UPDATE/DELETE, the existing resource's teamId is checked.
+    // Legacy events without teamId fail closed — run __backfillEventTeamIds
+    // in console BEFORE deploying these rules.
+    match /events/{eventId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.teamId is string &&
+        isTeamMember(request.resource.data.teamId);
+      allow read, update, delete: if isSignedIn() &&
+        resource.data.teamId is string &&
+        isTeamMember(resource.data.teamId);
+    }
+
+    // ====== /videos/{periodId} — video file pointers ======
+    // Same pattern as events: gated by team membership via the doc's teamId.
+    match /videos/{periodId} {
+      allow create: if isSignedIn() &&
+        request.resource.data.teamId is string &&
+        isTeamMember(request.resource.data.teamId);
+      allow read, update, delete: if isSignedIn() &&
+        resource.data.teamId is string &&
+        isTeamMember(resource.data.teamId);
+    }
+
+    // ====== /meetings/{meetingId} — future ======
+    // Not yet stored in Firestore (still localStorage). When migrated, gate by
+    // teamId similarly. Catch-all below would deny — that's correct fail-closed.
+
+    // ====== Default deny ======
+    // Anything not matched above is implicitly denied. No catch-all that grants
+    // open access to authenticated users — that was the Phase 1A baseline and
+    // is now tightened.
   }
 }

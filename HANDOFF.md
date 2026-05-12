@@ -301,7 +301,9 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
-**N12. In-game coaching tool: live HLS ingest + multi-angle stacking (asked 2026-05-11).** The killer workflow — coach at the rink tags Period 1 live, walks to the locker room at intermission, plays tagged clips with multiple angles. Difference between "review tool" and "in-game coaching tool".
+**N12. In-game coaching tool: live HLS ingest + multi-angle stacking (asked 2026-05-11, simplified 2026-05-12).** The killer workflow — coach at the rink tags Period 1 live, walks to the locker room at intermission, plays tagged clips with multiple angles. Difference between "review tool" and "in-game coaching tool".
+
+**XOS "Stacking Masters" clarification (per Ben):** simpler than I was making it. It's just multiple angles of the same period aligned to a common sync point (puck drop). One tag works across all angles via per-angle offsets. No complex live multi-stream sync magic required.
 
 **Architecture:**
 
@@ -345,6 +347,26 @@ At the rink (3 sources stacked):
 - Locker room: play tagged clips. Switch source files manually for different angles.
 
 This is the post-N1 north star for in-rink coaching. Schedule once cloud video (current work) is verified working end-to-end.
+
+---
+
+**N13. AI player tracking / keyframing (Once.Sport feature, captured 2026-05-12).** ML-based automatic player tracking. Watches video, follows each rostered player, tags clips with which players are visible. Massive coaching unlock — "show me every shift Player X was on" without manual tagging. Implementation paths:
+
+- Sportlogiq API integration (~$$$ enterprise tier, polished)
+- Custom pipeline: YOLOv8 (player detection) + DeepSORT (tracking) + ReID model (player identification by jersey) — open-source but training/tuning intensive
+- Hosted ML inference: needs server (or use AWS Sagemaker / Replicate). Server-only — too heavy for browser.
+
+Effort: weeks of work for custom; days for paid API integration. Probably gates of N13 on Phase 2 Lab and a budget decision.
+
+**N14. Coach Board / animated drill creator (Once.Sport feature, captured 2026-05-12).** Separate mode for animated drill diagrams — draw players + paths + puck on a rink diagram, animate over time. Used for systems install + skill development client deliverables. Distinct from clip telestration (which is over real video).
+
+UX: rink canvas + drag-able player tokens + path drawing tool + timeline scrubber. Export as MP4 (canvas captureStream + MediaRecorder) for sharing.
+
+Effort: ~6-12 hr in a focused session.
+
+**N15. Animated telestration (extends current 2D pen/arrow telestration).** Strokes that animate over time — arrows that draw across the clip, fade in/out, follow puck movement. More dramatic than functional but dramatically more pro-looking on exports. Once.Sport markets "3D telestration" but practical version is timed CSS/SVG animations on existing Stroke shapes.
+
+Effort: ~6-8 hr for v1.
 
 ---
 

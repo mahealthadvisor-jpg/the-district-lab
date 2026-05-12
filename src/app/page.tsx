@@ -413,6 +413,42 @@ export default function DistrictPlatform() {
       __cleanupTeams?: () => Promise<{ teamId: string; before: { memberIds: string[]; ownerId: string }; after: string }[]>;
       __addMember?: (teamId: string, uid: string, role: string) => Promise<string>;
       __debugTeams?: () => Promise<void>;
+      __backfillEventTeamIds?: () => Promise<{ updated: number; alreadyHadTeamId: number; orphaned: number }>;
+    };
+    // Backfill teamId on every event in Firestore. Walks team tree, builds a
+    // periodId → teamId map, then updates each event that's missing teamId.
+    // Required before tightening Firestore rules to per-team membership.
+    (window as WindowWithCleanup).__backfillEventTeamIds = async () => {
+      // Build periodId → teamId map from teams in local state.
+      const periodToTeam = new Map<string, string>();
+      function walk(folders: typeof teams[number]["folders"], teamId: string) {
+        for (const f of folders) {
+          for (const g of f.games) for (const p of g.periods) periodToTeam.set(p.id, teamId);
+          walk(f.subFolders, teamId);
+        }
+      }
+      for (const t of teams) walk(t.folders, t.id);
+      const eventsSnap = await fsGetDocs(fsCollection(firestoreDb, "events"));
+      let updated = 0;
+      let alreadyHadTeamId = 0;
+      let orphaned = 0;
+      for (const docSnap of eventsSnap.docs) {
+        const data = docSnap.data() as { gameId?: string; teamId?: string };
+        if (data.teamId) {
+          alreadyHadTeamId++;
+          continue;
+        }
+        const teamId = data.gameId ? periodToTeam.get(data.gameId) : undefined;
+        if (!teamId) {
+          orphaned++;
+          continue;
+        }
+        await fsUpdateDoc(fsDoc(firestoreDb, "events", docSnap.id), { teamId });
+        updated++;
+      }
+      const result = { updated, alreadyHadTeamId, orphaned };
+      console.log("Event teamId backfill complete:", result);
+      return result;
     };
     (window as WindowWithCleanup).__debugTeams = async () => {
       const myUid = user.uid;
