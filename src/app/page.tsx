@@ -913,15 +913,20 @@ export default function DistrictPlatform() {
   async function startLiveCapture(source: "webcam" | "screen") {
     if (isLive) return;
     try {
+      // Lower-resolution constraints reduce CPU load → less tagging lag.
+      // 720p30 is plenty for hockey review and works on every laptop.
       const stream =
         source === "webcam"
           ? await navigator.mediaDevices.getUserMedia({
-              video: { width: 1280, height: 720 },
+              video: { width: 1280, height: 720, frameRate: 30 },
               audio: true,
             })
           : await (navigator.mediaDevices as MediaDevices & {
               getDisplayMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
-            }).getDisplayMedia({ video: true, audio: true });
+            }).getDisplayMedia({
+              video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+              audio: true,
+            });
 
       mediaStreamRef.current = stream;
       setLiveSource(source);
@@ -1001,6 +1006,35 @@ export default function DistrictPlatform() {
       }
       const url = URL.createObjectURL(blob);
       setVideoUrl(url);
+
+      // Kick off cloud upload so other coaches in the locker room can also play
+      // the tagged clips from the period we just recorded. (N1 Phase 1C+.)
+      if (user) {
+        const path = findPeriodPath(teams, selectedGame.id);
+        const teamId = path?.team.id;
+        if (teamId) {
+          setVideoUploadPct(0);
+          const { task, donePromise } = videoCloud.uploadVideoToCloud(
+            file,
+            selectedGame.id,
+            teamId,
+            user.uid
+          );
+          task.on("state_changed", (snap) => {
+            const pct = Math.round((snap.bytesTransferred / snap.totalBytes) * 100);
+            setVideoUploadPct(pct);
+          });
+          donePromise
+            .then(() => {
+              setVideoUploadPct(null);
+              console.log("Live recording uploaded to cloud for period", selectedGame.id);
+            })
+            .catch((err) => {
+              setVideoUploadPct(null);
+              console.error("Cloud upload of live capture failed:", err);
+            });
+        }
+      }
     } else {
       // No recording captured — clear the video element
       const v = videoRef.current;
