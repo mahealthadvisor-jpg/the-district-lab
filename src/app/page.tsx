@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import * as eventsStore from "@/lib/events-store";
 import * as teamsStore from "@/lib/teams-store";
 import * as videoCloud from "@/lib/video-cloud";
+import * as liveStream from "@/lib/live-stream";
 import { db as firestoreDb } from "@/lib/firebase";
 import {
   collection as fsCollection,
@@ -567,6 +568,10 @@ export default function DistrictPlatform() {
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  /** Cloudflare Stream WebRTC push connection (Phase 1C+ Path C live streaming). */
+  const livePeerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  /** Cloudflare Stream live input UID for the current capture session. */
+  const liveUidRef = useRef<string | null>(null);
   const [liveSource, setLiveSource] = useState<"webcam" | "screen" | null>(null);
 
   // Per-team rink image. Falls back to the global /rink.png shipped in /public.
@@ -813,12 +818,29 @@ export default function DistrictPlatform() {
     });
 
     // Video resolution priority (Phase 1C+):
-    //   1. Local IndexedDB (instant, for the coach who uploaded)
-    //   2. Cloud (Firebase Storage) — for other coaches on this team
-    //   3. /games/{filename} static fallback (legacy)
+    //   1. Cloudflare Stream HLS (live OR VOD) — multi-coach real-time playback
+    //   2. Local IndexedDB (instant for the coach who uploaded)
+    //   3. Firebase Storage URL — fallback for files uploaded before Cloudflare
+    //   4. /games/{filename} static fallback (legacy)
     let revoke: string | null = null;
     setVideoUrl(null);
     (async () => {
+      // Check Firestore /videos doc for Cloudflare HLS URL first
+      try {
+        const { getDoc, doc: fsDocFn } = await import("firebase/firestore");
+        const { db: fsDb } = await import("@/lib/firebase");
+        const snap = await getDoc(fsDocFn(fsDb, "videos", selectedGame.id));
+        if (snap.exists()) {
+          const data = snap.data() as { hlsUrl?: string; isLive?: boolean };
+          if (data.hlsUrl) {
+            setVideoUrl(data.hlsUrl); // hls.js attached via useEffect below
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to check Firestore /videos for HLS URL:", err);
+      }
+      // Fall back to local IndexedDB
       try {
         const file = await loadVideo(selectedGame.id);
         if (file) {
@@ -828,7 +850,7 @@ export default function DistrictPlatform() {
           return;
         }
       } catch {
-        // fall through to cloud
+        // fall through to firebase storage
       }
       try {
         const cloudUrl = await videoCloud.getCloudVideoUrl(selectedGame.id);
@@ -837,7 +859,7 @@ export default function DistrictPlatform() {
           return;
         }
       } catch (err) {
-        console.error("Failed to fetch cloud video URL:", err);
+        console.error("Failed to fetch Firebase Storage URL:", err);
       }
       setVideoUrl(selectedGame.file ? `/games/${selectedGame.file}` : null);
     })();
@@ -846,6 +868,38 @@ export default function DistrictPlatform() {
       if (revoke) URL.revokeObjectURL(revoke);
     };
   }, [selectedGame, isClient]);
+
+  // HLS playback wiring: when videoUrl is an .m3u8, attach hls.js (or rely on
+  // Safari's native HLS support). Phase 1C+ Path C.
+  useEffect(() => {
+    if (!videoUrl || !videoRef.current) return;
+    if (!videoUrl.endsWith(".m3u8")) return; // not HLS, normal element src is fine
+    const v = videoRef.current;
+    // Safari has native HLS support; just set src
+    if (v.canPlayType("application/vnd.apple.mpegurl")) {
+      v.src = videoUrl;
+      return;
+    }
+    // Chrome / Firefox / Edge: use hls.js
+    let hlsInstance: import("hls.js").default | null = null;
+    let cancelled = false;
+    (async () => {
+      const HlsModule = await import("hls.js");
+      const Hls = HlsModule.default;
+      if (cancelled || !v) return;
+      if (Hls.isSupported()) {
+        hlsInstance = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hlsInstance.loadSource(videoUrl);
+        hlsInstance.attachMedia(v);
+      } else {
+        console.error("HLS not supported in this browser");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (hlsInstance) hlsInstance.destroy();
+    };
+  }, [videoUrl]);
 
   async function handleVideoFile(file: File) {
     if (!file.type.startsWith("video/")) {
@@ -958,6 +1012,39 @@ export default function DistrictPlatform() {
       };
       recorder.start(1000);
       mediaRecorderRef.current = recorder;
+
+      // Phase 1C+ Path C: ALSO push to Cloudflare Stream Live via WHIP so other
+      // coaches can watch live with ~5-10 sec latency. The MediaRecorder above
+      // continues to produce a local file as a backup + instant scrub source.
+      // Failure here is non-fatal — local recording still works.
+      if (user) {
+        const path = findPeriodPath(teams, selectedGame.id);
+        const teamId = path?.team.id;
+        if (teamId) {
+          try {
+            const liveInput = await liveStream.createLiveInput(
+              selectedGame.id,
+              teamId,
+              `${path.team.name} · ${path.game.name} · ${selectedGame.label}`
+            );
+            const pc = await liveStream.pushToWhip(stream, liveInput.whipUrl);
+            livePeerConnectionRef.current = pc;
+            liveUidRef.current = liveInput.uid;
+            if (liveInput.hlsUrl) {
+              await liveStream.markVideoLive(
+                selectedGame.id,
+                teamId,
+                liveInput.uid,
+                liveInput.hlsUrl,
+                user.uid
+              );
+            }
+            console.log("Live stream up:", liveInput.uid, liveInput.hlsUrl);
+          } catch (err) {
+            console.error("Cloudflare live push failed (local capture still works):", err);
+          }
+        }
+      }
     } catch (e) {
       console.error(e);
       const msg =
@@ -978,6 +1065,18 @@ export default function DistrictPlatform() {
       });
       const mime = recorder.mimeType || "video/webm";
       blob = new Blob(recordedChunksRef.current, { type: mime });
+    }
+    // Close Cloudflare Stream live WebRTC connection. Cloudflare auto-converts
+    // the live to a VOD with the same UID, so /videos doc keeps its hlsUrl valid.
+    if (livePeerConnectionRef.current) {
+      livePeerConnectionRef.current.close();
+      livePeerConnectionRef.current = null;
+      if (liveUidRef.current) {
+        liveStream
+          .markVideoLiveEnded(selectedGame.id)
+          .catch((err) => console.error("markVideoLiveEnded failed:", err));
+        liveUidRef.current = null;
+      }
     }
     // Stop all tracks
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
