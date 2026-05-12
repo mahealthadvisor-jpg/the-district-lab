@@ -357,6 +357,23 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
+**N16. Private folders within a team (XOS feature, captured 2026-05-12).** XOS supports private folders — folders within a team only visible to specific users, even if all coaches see the rest of the team. Different from team membership (which is across teams).
+
+**Data model change:**
+- Add `private?: boolean` + `ownerUid?: string` + `accessUids?: string[]` to `Folder` type
+- Folders default to public (team-wide visible)
+- Private folders only visible to ownerUid + accessUids
+
+**Implementation options:**
+1. **Client-side filtering only (~3-4 hr)** — Lab sidebar hides private folders from coaches not in `accessUids`. Folder names + structure still in team doc, so technically discoverable via Firestore — security-by-obscurity. Fine for trusted coach team.
+2. **Server-enforced via subcollection refactor (~6-8 hr)** — Move folders from embedded array in team doc to `/teams/{teamId}/folders/{folderId}` subcollection. Add Firestore rules: only members can read teams; only folder.accessUids can read private folders. Real security.
+
+**Recommended for Ben:** Path 2 (server-enforced) since client work might need real isolation. But Path 1 first to ship the UX, harden later.
+
+**UX:** Right-click folder → "Mark Private" → opens a dialog to pick which coaches can access. Owner is auto-added. Lock icon next to private folder names in sidebar.
+
+---
+
 **N12 augmentation (XOS Network Capture doc, 2026-05-12):**
 - XOS supports up to **4 angles** stacked via Stacked Masters — match that.
 - Standard format is **720p 59.94 fps with 15 or 30 GOP** — Lab capture should target this for max compat
