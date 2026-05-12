@@ -301,6 +301,53 @@ Newburyport (Team)/
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
 
+**N12. In-game coaching tool: live HLS ingest + multi-angle stacking (asked 2026-05-11).** The killer workflow — coach at the rink tags Period 1 live, walks to the locker room at intermission, plays tagged clips with multiple angles. Difference between "review tool" and "in-game coaching tool".
+
+**Architecture:**
+
+```
+At the rink (3 sources stacked):
+├── LiveBarn HLS (overhead)           ← coach pastes signed .m3u8 URL
+├── XbotGo / manual cam (sideline)    ← RTMP → cloud relay → HLS
+├── Bench cam (player POV, optional)  ← same path as XbotGo
+└── Coach's laptop runs Lab:
+    - All 3 streams playing simultaneously
+    - Tag events once → attached to the Period (covers all angles)
+    - Playback during intermission with angle-switcher UI
+    - Real-time, no recording delay
+```
+
+**Pieces needed:**
+
+1. **Live HLS ingest in Lab:** paste a `.m3u8` URL → Lab plays it directly via HTML5 `<video>` + native HLS support (Safari) or `hls.js` (Chrome/Firefox). Tags use HLS PROGRAM-DATE-TIME for stable timestamps across reconnects.
+2. **Multi-angle data model:** `Period.angles[] = [{ id, label, url, offsetSec, isLive }]`. `offsetSec` aligns angles to a common puck-drop time reference.
+3. **Cloud relay service:** Cloudflare Stream OR Mux ingest RTMP from XbotGo / OBS at the rink, output HLS for Lab consumption. ~$1-3/hr of streaming at our scale.
+4. **Angle-switcher UI at playback:** thumbnails along the top of the video stage, click to switch. Optional split-screen mode (2x2 grid for 4 angles).
+5. **XbotGo integration** (if they expose RTMP push or webhook): auto-add their stream as an angle on the current Period.
+
+**Bandwidth reality at the rink:**
+- Rink WiFi: useless for live streaming.
+- 5G cellular hotspot (Verizon/T-Mobile unlimited): 30-100 Mbps reliable. Workable for 2-3 simultaneous 1080p streams up + 1 down.
+- Each 1080p stream needs ~5-8 Mbps up. 3 angles = ~15-24 Mbps total. Tight but doable on good 5G.
+
+**Effort (multi-session):**
+- Live HLS ingest + tag against stream: ~6-8 hr
+- Multi-angle data model + playback switcher: ~4-6 hr
+- Cloud relay (Cloudflare Stream) integration: ~4 hr setup + code
+- XbotGo-specific plumbing: ~2-3 hr (TBD on their API)
+- **Total: ~16-21 hr across 3-4 sessions**
+
+**Interim no-dev workaround for this season:**
+- OBS on a 2nd device records LiveBarn locally to laptop SSD (zero browser contention, smooth)
+- XbotGo records to its own SD card simultaneously
+- At intermission: USB-drag files to the Lab laptop, drop into the relevant Period as separate angles (current Lab only handles single angle — show LiveBarn first, swap to XbotGo file for second look)
+- Tag during the game on a paper notepad or in Lab against the OBS-captured-so-far file
+- Locker room: play tagged clips. Switch source files manually for different angles.
+
+This is the post-N1 north star for in-rink coaching. Schedule once cloud video (current work) is verified working end-to-end.
+
+---
+
 **N11. Twitter / X import + export pipelines (asked 2026-05-11).** Coaching workflow needs both directions:
 
 **Inbound — download clips/GIFs from Twitter:**
