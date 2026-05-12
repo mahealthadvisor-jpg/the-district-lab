@@ -171,7 +171,63 @@ Sharing (Ben's 2026-05-07 ask):
 
 **N1. Multi-coach accounts + shared projects (Hudl/Catapult-style).** Asked late-2026-05-07 evening. The Lab needs Firebase Auth (per-coach login) + Firestore replacing localStorage as the source of truth (so HC + AC1 + AC2 see the same tagged clips, meetings, rosters in real time). Per-team permissions ("HC on Triton, AC2 on Newburyport"). Migration path for existing localStorage data. **Architecture shift, ~6-8 hours, blocks all sharing items below.** Ben must create Firebase project first — see `FIREBASE_SETUP.md` at repo root.
 
-**N2. Settings page for clip-type config + per-code prompt-flow toggle.** Asked 2026-05-07 evening. New top-level "Settings" view. Per code (the 24 in `codes.ts`): editable label, hotkey, category, AND a prompt-flow toggle.
+**N2. Settings page for clip-type config + Headings Groups + per-code prompt-flow toggle (expanded per XOS Headings Groups doc, captured 2026-05-12).** Asked 2026-05-07. New top-level "Settings" view. Way bigger than originally specced — XOS exposes a full Code Editor + Headings Groups system that we should mirror.
+
+**Per-code editor (the existing 24 + future codes):**
+- editable name, hotkey, category, color
+- pre-roll / post-roll (our lead/lag)
+- **Prompt for Data toggle** (the per-code prompt-flow from earlier spec)
+- **Pause Video when Prompting** toggle
+- Parent Clip Type (hierarchical — e.g. "Coaches Clips" → "Head Coach")
+- Line Awareness (track active line on tag)
+- Active / Inactive toggle (disable code without deleting)
+- Per-code Headings Group assignment
+
+**Headings Groups (column-set definitions, brand-new concept for us):**
+- A Headings Group = ordered list of TaggedEvent fields to display alongside clips
+- Coach creates multiple (e.g. "Coaches", "Faceoffs", "PK Detail", "NHL Basic")
+- Switch between them based on what context coach is in
+- **Hierarchy:** Edit-level override → Filter-level → Folder-level → User-default. Per-code Headings Group assignment is separate.
+
+**New TaggedEvent fields XOS surfaces (to add gradually):**
+- `pressureType` — e.g. F1/F2/F3 forecheck pressure
+- `successful` — Y/N for the action (did the breakout work, did the FO win, etc.)
+- `headCoachComments` / `assistantCoach1Comments` / `assistantCoach2Comments` / `videoCoachComments` — four separate comment fields per coach role (we have one)
+- `playerParticipation` — open-ended player involvement notes (separate from `playerIds` chip list)
+- `result` — outcome label (game-state outcome)
+- `scoutedPlayer` + `scoutedScore` + `scoutedScoreDif` — player scouting metadata
+- `secondaryInv1-4` — secondary involvements (e.g. who else touched the puck on this play)
+- `system` — which tactical system was in use
+- `shift` / `shiftStartTime` / `shiftEndTime` / `toiPlayerName` — time-on-ice tracking (links to Shift Tracker N1.B linkup)
+
+**Capture template pattern (from XOS Network Capture doc):**
+- A "capture template" is a saved multi-camera config (RTSP URLs + audio settings + view labels + framerate)
+- Coach picks template when starting capture, all cameras come up pre-configured
+- For our Lab: saves on N12 multi-source ingest — coach can save "Triton bench setup" as a template (XbotGo URL + LiveBarn extracted URL + iPhone WebRTC), reuse next game.
+
+**Behavior when prompt-flow is toggled ON for a code (per Ben late-2026-05-07):**
+- Hitting the hotkey **auto-pops a modal** — coach stays in flow, no right-click needed.
+- All inputs keyboard-driven so coach can rapid-fire tag during a film session.
+- Modal pauses video while open; Esc cancels without creating tag; Enter commits.
+- Once submitted, tag created with full metadata, modal closes, video resumes (or stays paused — coach choice in Settings).
+- **Right-click context menu items (Mark Win/Loss, Set Goalie, etc.) STAY** — they're for editing clips after the fact.
+
+**Faceoff prompt-flow spec:** (already partially shipped — see N7 below)
+- Hotkey: `f` (currently `x`)
+- Modal opens → press `W` or `L` → next field
+- Press `H` (help) or `N` (no help) → next field
+- Type jersey number + Enter → centerman recorded
+- Tag committed, modal closes
+
+**Other codes worth prompt-flow:** Goal-against (set goalie + maybe location quadrant), Penalty (player + duration), Goalie Touch (which goalie). Decision per code via the Settings toggle.
+
+**Storage:** localStorage as user overrides on top of `codes.ts` defaults. Eventually Firestore.
+
+**Quickie Stats consumes this data** — W/L breakdowns, FO% by zone × strength × centerman, etc. Drill-down on prompted fields.
+
+**Effort:** ~15-25 hours all in (Settings UI alone is 4-6 hr, Headings Groups + hierarchy is 4-6 hr, per-code prompt-flow modal builder is 3-5 hr, new TaggedEvent fields land gradually).
+
+**Old N2 spec (superseded above) kept for reference:**
 
 **Behavior when prompt-flow is toggled ON for a code (per Ben late-2026-05-07):**
 - Hitting the hotkey **auto-pops a modal** — coach stays in flow, no right-click needed.
@@ -300,6 +356,16 @@ Newburyport (Team)/
 **XOS-style "Paste" workflow:** Build the "Opponent Scout" template once (saved on Team or per-Coach in Firestore). New opponent? Pick template → name new top-level folder ("04 Holy Cross") → Paste → entire skeleton stamps + top-level auto-renames per the screenshot's Paste button. Same for Player Development (clients).
 
 **The Hot Folder concept is new for the Lab.** Currently no equivalent. Build as: a per-context working folder where new tags land by default until promoted. Periodic UX nudge: "You've got 47 clips in Hot Folder for Triton — promote them or clear?"
+
+**N12 augmentation (XOS Network Capture doc, 2026-05-12):**
+- XOS supports up to **4 angles** stacked via Stacked Masters — match that.
+- Standard format is **720p 59.94 fps with 15 or 30 GOP** — Lab capture should target this for max compat
+- **All angles must match format** for stacking to work — auto-transcode mismatched media. Our setup needs to enforce this.
+- **CTRL+Space cycles views** during live capture — perfect hotkey for our angle switcher.
+- **Per-channel view selection** — each angle labeled (Program, End Zone, Opponent, etc.) — matches our `Period.angles[].label` field.
+- **Capture templates** — saved multi-camera configs. Coach picks template, all RTSP URLs + audio + framerate come up pre-configured. Big UX win for repeat use.
+
+---
 
 **N12. In-game coaching tool: live HLS ingest + multi-angle stacking (asked 2026-05-11, simplified 2026-05-12).** The killer workflow — coach at the rink tags Period 1 live, walks to the locker room at intermission, plays tagged clips with multiple angles. Difference between "review tool" and "in-game coaching tool".
 
